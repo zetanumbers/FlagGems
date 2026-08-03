@@ -579,7 +579,11 @@ def mul_broadcast_func(a, b, out=None):
     if device.type != "cuda":
         if out is not None:
             return torch.ops.aten.mul.out.redispatch(_FALLBACK_KEYSET, a, b, out=out)
-        return torch.ops.aten.mul.Tensor.redispatch(_FALLBACK_KEYSET, a, b)
+        if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
+            return torch.ops.aten.mul.Tensor.redispatch(_FALLBACK_KEYSET, a, b)
+        if isinstance(a, torch.Tensor):
+            return torch.ops.aten.mul.Scalar.redispatch(_FALLBACK_KEYSET, a, b)
+        return torch.ops.aten.mul.Scalar.redispatch(_FALLBACK_KEYSET, b, a)
 
     dtype = _result_dtype(a, b)
 
@@ -724,7 +728,11 @@ def mul_complex_broadcast_func(a, b, out=None):
     if device.type != "cuda":
         if out is not None:
             return torch.ops.aten.mul.out.redispatch(_FALLBACK_KEYSET, a, b, out=out)
-        return torch.ops.aten.mul.Tensor.redispatch(_FALLBACK_KEYSET, a, b)
+        if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
+            return torch.ops.aten.mul.Tensor.redispatch(_FALLBACK_KEYSET, a, b)
+        if isinstance(a, torch.Tensor):
+            return torch.ops.aten.mul.Scalar.redispatch(_FALLBACK_KEYSET, a, b)
+        return torch.ops.aten.mul.Scalar.redispatch(_FALLBACK_KEYSET, b, a)
 
     dtype = _result_dtype(a, b)
     ar, ai = _complex_parts(a, device=device, complex_dtype=dtype)
