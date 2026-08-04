@@ -121,10 +121,12 @@ def test_copy_inplace_float8_e8m0fnu(shape):
     src = src_uint8.view(torch.float8_e8m0fnu)
     ref_src = utils.to_reference(src)
 
-    ref_dst = utils.to_reference(
-        torch.zeros(shape, dtype=torch.float8_e8m0fnu, device=device)
-    )
-    res_dst = torch.zeros(shape, dtype=torch.float8_e8m0fnu, device=device)
+    ref_uint8 = torch.zeros(shape, dtype=torch.uint8, device=device)
+    ref_fp8 = ref_uint8.view(torch.float8_e8m0fnu)
+    ref_dst = utils.to_reference(ref_fp8)
+
+    res_uint8 = torch.zeros(shape, dtype=torch.uint8, device=device)
+    res_dst = res_uint8.view(torch.float8_e8m0fnu)
     ref_dst.copy_(ref_src)
 
     with flag_gems.use_gems():
@@ -180,7 +182,7 @@ def test_copy_inplace_mixed_dtype_triton(src_dtype, dst_dtype):
         base = torch.tensor([True, False, True, True, False, True, False, True])
         src = base.to(device=device)
     else:
-        if flag_gems.vendor_name == "mthreads":
+        if flag_gems.vendor_name in ("mthreads", "ascend"):
             src = torch.arange(numel, device="cpu", dtype=src_dtype).to(device)
         else:
             src = torch.arange(numel, device=device, dtype=src_dtype)
