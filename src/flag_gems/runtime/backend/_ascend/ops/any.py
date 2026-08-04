@@ -49,7 +49,10 @@ def any_kernel_dim(
     BLOCK_N: tl.constexpr,
 ):
     # Map the program id to the row of inp it should compute.
-    pid = ext.program_id(0)
+    pid_m = ext.program_id(0)
+    pid_b = ext.program_id(1)
+    num_pid_m = tl.num_programs(0)
+    pid = pid_b * num_pid_m + pid_m
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)[:, None]
     inp = inp + rows * N
     out = out + rows
@@ -59,10 +62,10 @@ def any_kernel_dim(
     for off in range(0, N, BLOCK_N):
         cols = off + tl.arange(0, BLOCK_N)[None, :]
         col_mask = cols < N
-        mask = row_mask and col_mask
+        mask = row_mask & col_mask
 
         a = tl.load(inp + cols, mask, other=0.0)
-        _any = _any or (a != 0)
+        _any = _any | (a != 0)
     any = tl.reduce(_any, axis=1, combine_fn=reduce_any)
     tl.store(out, any[:, None], row_mask)
 
@@ -131,9 +134,12 @@ def any_dim(inp, dim=None, keepdim=False):
         out = torch.empty(shape, dtype=torch.bool, device=inp.device)
 
         def grid_fn(meta):
-            grid = triton.cdiv(M, meta["BLOCK_M"])
-            grid = grid if grid <= 65535 else 65535
-            return (grid,)
+            total = triton.cdiv(M, meta["BLOCK_M"])
+            if total <= 65535:
+                return (total, 1)
+            pid_b = triton.cdiv(total, 65535)
+            pid_m = triton.cdiv(total, pid_b)
+            return (pid_m, pid_b)
 
         with torch_device_fn.device(inp.device):
             any_kernel_dim[grid_fn](inp, out, M, N)
@@ -160,10 +166,16 @@ def any_dims(inp, dim=None, keepdim=False):
 
     out = torch.empty(shape, dtype=torch.bool, device=inp.device)
 
-    grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]),)
+    def grid_fn(meta):
+        total = triton.cdiv(M, meta["BLOCK_M"])
+        if total <= 65535:
+            return (total, 1)
+        pid_b = triton.cdiv(total, 65535)
+        pid_m = triton.cdiv(total, pid_b)
+        return (pid_m, pid_b)
 
     with torch_device_fn.device(inp.device):
-        any_kernel_dim[grid](inp, out, M, N)
+        any_kernel_dim[grid_fn](inp, out, M, N)
     if not keepdim:
         out = out.squeeze(dim=dim)
     return out
