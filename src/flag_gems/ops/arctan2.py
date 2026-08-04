@@ -11,10 +11,36 @@ _atan2 = tl_extra_shim.atan2
 logger = logging.getLogger(__name__)
 
 
+@triton.jit
+def _atan2_safe(x, y):
+    PI = 3.141592653589793
+    HALF_PI = 1.5707963267948966
+    INF = float("inf")
+
+    result = _atan2(x, y)
+
+    x_inf = tl.abs(x) == INF
+    y_inf = tl.abs(y) == INF
+    x_pos = x > 0
+    y_pos = y > 0
+
+    result = tl.where(x_inf & x_pos & ~y_inf, HALF_PI, result)
+    result = tl.where(x_inf & ~x_pos & ~y_inf, -HALF_PI, result)
+
+    result = tl.where(x_inf & x_pos & y_inf & y_pos, PI / 4, result)
+    result = tl.where(x_inf & x_pos & y_inf & ~y_pos, 3 * PI / 4, result)
+    result = tl.where(x_inf & ~x_pos & y_inf & y_pos, -PI / 4, result)
+    result = tl.where(x_inf & ~x_pos & y_inf & ~y_pos, -3 * PI / 4, result)
+
+    result = tl.where((x != x) | (y != y), float("nan"), result)
+
+    return result
+
+
 @pointwise_dynamic(promotion_methods=[(0, 1, "DEFAULT")])
 @triton.jit
 def arctan2_kernel(x, y):
-    return _atan2(x.to(tl.float32), y.to(tl.float32))
+    return _atan2_safe(x.to(tl.float32), y.to(tl.float32))
 
 
 def arctan2(input, other):
