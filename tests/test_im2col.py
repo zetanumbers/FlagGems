@@ -29,7 +29,6 @@ IM2COL_CONFIGS = [
 ]
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 @pytest.mark.im2col
 @pytest.mark.parametrize("shape", IM2COL_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)

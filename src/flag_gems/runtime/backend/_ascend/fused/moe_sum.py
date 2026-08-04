@@ -89,7 +89,6 @@ def moe_sum_kernel(
                     base + k * expert_stride,
                     mask=valid_mask,
                     other=0.0,
-                    care_padding=False,
                 )
                 result += val.to(tl.float32)
 
@@ -111,7 +110,7 @@ def moe_sum_kernel(
 
             for k in range(topk):
                 ptr = input_base + k * input_stride_topk + h_indices
-                val = tl.load(ptr, mask=valid_mask, other=0.0, care_padding=False)
+                val = tl.load(ptr, mask=valid_mask, other=0.0,)
                 result += val.to(tl.float32)
 
             tl.store(
@@ -158,9 +157,9 @@ def moe_sum_kernel_topk2(
         base = input_ptr + input_token_offset + h_indices
 
         # Fully unrolled for topk=2
-        val0 = tl.load(base, mask=valid_mask, other=0.0, care_padding=False)
+        val0 = tl.load(base, mask=valid_mask, other=0.0,)
         val1 = tl.load(
-            base + hidden_size, mask=valid_mask, other=0.0, care_padding=False
+            base + hidden_size, mask=valid_mask, other=0.0,
         )
 
         result = val0.to(tl.float32) + val1.to(tl.float32)
