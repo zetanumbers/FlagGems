@@ -34,6 +34,5 @@ def test_linalg_eigvals(shape, dtype):
     with flag_gems.use_gems():
         res_out = torch.ops.aten._linalg_eigvals.default(inp)
 
-    # Compare complex eigenvalues - use the output dtype for comparison
-    # For float32 input, output is complex64
-    utils.gems_assert_close(res_out, ref_out, res_out.dtype)
+    # Compare complex eigenvalues on CPU - NPU doesn't support isclose for complex64
+    utils.gems_assert_close(res_out.cpu(), ref_out.cpu(), res_out.dtype)

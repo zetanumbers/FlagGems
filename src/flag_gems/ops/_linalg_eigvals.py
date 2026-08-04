@@ -69,7 +69,7 @@ def _linalg_eigvals(inp):
     BLOCK_SIZE = 128
     grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
 
-    with torch.cuda.device(inp.device):
+    with torch.npu.device(inp.device):
         _linalg_eigvals_proxy_kernel[grid](inp, output, n_elements, BLOCK_SIZE)
 
     # Compute eigenvalues via PyTorch's public linalg API, which dispatches
