@@ -63,14 +63,16 @@ def _pack_ue8m0_scales(scales):
 
 
 def _unpack_ue8m0_scales(scale_packed, chunks_per_head):
+    scale_packed_device = scale_packed.device
+    scale_packed = scale_packed.cpu()
     shifts = (
-        torch.arange(chunks_per_head, device=scale_packed.device, dtype=torch.int32) * 8
+        torch.arange(chunks_per_head, device='cpu', dtype=torch.int32) * 8
     )
     ue8m0_bytes = (scale_packed.unsqueeze(-1) >> shifts) & 0xFF
     scale_bits = (ue8m0_bytes << 23).contiguous().view(torch.float32)
     return scale_bits.reshape(
         *scale_packed.shape[:-1], scale_packed.shape[-1] * chunks_per_head
-    )
+    ).to(scale_packed_device)
 
 
 def _dequantize(o_fp8, scale, heads_per_group, quant_group_size):
