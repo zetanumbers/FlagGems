@@ -576,7 +576,7 @@ def mul_broadcast_func(a, b, out=None):
         raise TypeError("mul expects tensor or scalar inputs")
 
     device = _select_device(a, b)
-    if device.type != "cuda":
+    if device.type == "cpu":
         if out is not None:
             return torch.ops.aten.mul.out.redispatch(_FALLBACK_KEYSET, a, b, out=out)
         if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
@@ -725,7 +725,7 @@ def _launch_complex_generic(
 
 def mul_complex_broadcast_func(a, b, out=None):
     device = _select_device(a, b)
-    if device.type != "cuda":
+    if device.type == "cpu":
         if out is not None:
             return torch.ops.aten.mul.out.redispatch(_FALLBACK_KEYSET, a, b, out=out)
         if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):

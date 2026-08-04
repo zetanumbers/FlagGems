@@ -26,18 +26,15 @@ from . import accuracy_utils as utils
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_linalg_cholesky(shape, dtype):
     # Create a positive-definite matrix: A = B @ B^T + I
+    # Construct on CPU because NPU doesn't support float64 matmul.
     n = shape[-1]
-    B = torch.randn(shape, dtype=dtype, device=flag_gems.device)
-    A = (
-        B @ B.transpose(-2, -1)
-        + torch.eye(n, dtype=dtype, device=flag_gems.device) * 0.1
-    )
+    B = torch.randn(shape, dtype=dtype, device="cpu")
+    A = B @ B.transpose(-2, -1) + torch.eye(n, dtype=dtype) * 0.1
+    A = A.to(flag_gems.device)
 
-    # For reference, convert to CPU and use torch.linalg.cholesky
-    ref_A = utils.to_reference(A)
-    ref_out = torch.linalg.cholesky(ref_A)
+    # Reference on CPU (NPU native cholesky crashes on edge cases).
+    ref_out = torch.linalg.cholesky(A.cpu()).to(flag_gems.device)
 
-    # For gems, use aten.linalg_cholesky with flag_gems
     with flag_gems.use_gems():
         res_out = torch.ops.aten.linalg_cholesky(A)
 
@@ -51,17 +48,12 @@ def test_linalg_cholesky(shape, dtype):
 def test_linalg_cholesky_upper(shape, dtype):
     # Test with upper=True
     n = shape[-1]
-    B = torch.randn(shape, dtype=dtype, device=flag_gems.device)
-    A = (
-        B @ B.transpose(-2, -1)
-        + torch.eye(n, dtype=dtype, device=flag_gems.device) * 0.1
-    )
+    B = torch.randn(shape, dtype=dtype, device="cpu")
+    A = B @ B.transpose(-2, -1) + torch.eye(n, dtype=dtype) * 0.1
+    A = A.to(flag_gems.device)
 
-    # For reference, convert to CPU and use torch.linalg.cholesky
-    ref_A = utils.to_reference(A)
-    ref_out = torch.linalg.cholesky(ref_A, upper=True)
+    ref_out = torch.linalg.cholesky(A.cpu(), upper=True).to(flag_gems.device)
 
-    # For gems, use aten.linalg_cholesky with flag_gems
     with flag_gems.use_gems():
         res_out = torch.ops.aten.linalg_cholesky(A, upper=True)
 
@@ -75,17 +67,12 @@ def test_linalg_cholesky_upper(shape, dtype):
 def test_linalg_cholesky_batch(shape, dtype):
     # Create positive-definite matrices for batched input: A = B @ B^T + I
     n = shape[-1]
-    B = torch.randn(shape, dtype=dtype, device=flag_gems.device)
-    A = (
-        B @ B.transpose(-2, -1)
-        + torch.eye(n, dtype=dtype, device=flag_gems.device) * 0.1
-    )
+    B = torch.randn(shape, dtype=dtype, device="cpu")
+    A = B @ B.transpose(-2, -1) + torch.eye(n, dtype=dtype) * 0.1
+    A = A.to(flag_gems.device)
 
-    # For reference, convert to CPU and use torch.linalg.cholesky
-    ref_A = utils.to_reference(A)
-    ref_out = torch.linalg.cholesky(ref_A)
+    ref_out = torch.linalg.cholesky(A.cpu()).to(flag_gems.device)
 
-    # For gems, use aten.linalg_cholesky with flag_gems
     with flag_gems.use_gems():
         res_out = torch.ops.aten.linalg_cholesky(A)
 
