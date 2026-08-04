@@ -27,12 +27,6 @@ logger = logging.getLogger(__name__)
 @pointwise_dynamic(promotion_methods=[(0, 1, "BOOL_TO_LONG")])
 @triton.jit
 def pow_func(x, exponent):
-    if (
-        tl.constexpr(exponent.dtype.is_fp32())
-        or tl.constexpr(exponent.dtype.is_fp16())
-        or tl.constexpr(exponent.dtype.is_bf16())
-    ):
-        return _pow(x.to(tl.float32), exponent)
     return _pow(x.to(tl.float32), exponent.to(tl.float32))
 
 
@@ -51,12 +45,6 @@ def pow_tensor_tensor_(A, exponent):
 @pointwise_dynamic(is_tensor=[True, False], promotion_methods=[(0, 1, "BOOL_TO_LONG")])
 @triton.jit
 def pow_func_tensor_scalar(x, exponent):
-    if (
-        tl.constexpr(exponent.dtype.is_fp32())
-        or tl.constexpr(exponent.dtype.is_fp16())
-        or tl.constexpr(exponent.dtype.is_bf16())
-    ):
-        return _pow(x.to(tl.float32), exponent)
     return _pow(x.to(tl.float32), exponent.to(tl.float32))
 
 
@@ -75,12 +63,6 @@ def pow_tensor_scalar_(A, exponent):
 @pointwise_dynamic(is_tensor=[False, True], promotion_methods=[(0, 1, "BOOL_TO_LONG")])
 @triton.jit
 def pow_func_scalar_tensor(x, exponent):
-    if (
-        tl.constexpr(exponent.dtype.is_fp32())
-        or tl.constexpr(exponent.dtype.is_fp16())
-        or tl.constexpr(exponent.dtype.is_bf16())
-    ):
-        return _pow(x.to(tl.float32), exponent)
     return _pow(x.to(tl.float32), exponent.to(tl.float32))
 
 
