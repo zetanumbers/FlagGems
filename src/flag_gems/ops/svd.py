@@ -70,7 +70,7 @@ def _should_guard_gram_spectrum(batch, k):
 
 
 def _is_float32_cuda_matrix(input):
-    return input.is_cuda and input.dtype == torch.float32 and input.dim() >= 2
+    return input.dtype == torch.float32 and input.dim() >= 2
 
 
 def _is_low_precision_cuda_matrix(input):
