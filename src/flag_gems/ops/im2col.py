@@ -131,7 +131,7 @@ def im2col_kernel(
 
 
 def _launch_im2col_kernel(x, out, kH, kW, dH, dW, pH, pW, sH, sW):
-    assert x.is_cuda and out.is_cuda, "Inputs must be CUDA tensors"
+    # assert x.is_cuda and out.is_cuda, "Inputs must be CUDA tensors"
     x = x.contiguous()
     out = out.contiguous()
 
