@@ -27,14 +27,24 @@ except ImportError:
     TE_OP = None
 
 
+def _geglu_pytorch(input_tensor, quantizer=None):
+    H = input_tensor.shape[-1] // 2
+    x = input_tensor.to(torch.float32)
+    a, b = x[..., :H], x[..., H:]
+    out = torch.nn.functional.gelu(a, approximate="tanh") * b
+    return out.to(input_tensor.dtype)
+
+
+REF_OP = TE_OP if TE_OP is not None else _geglu_pytorch
+
+
 @pytest.mark.geglu
 @pytest.mark.parametrize("shape", utils.GLU_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-@pytest.mark.skipif(TE_OP is None, reason="'geglu' not found in TransformerEngine")
 def test_geglu(shape, dtype):
     input_tensor = torch.randn(shape, dtype=dtype, device=flag_gems.device)
 
-    ref_out = TE_OP(input_tensor, None)
+    ref_out = REF_OP(input_tensor, None)
     ref_out = utils.to_reference(ref_out)
 
     with flag_gems.use_gems():
