@@ -58,51 +58,32 @@ def var_mean_welford_kernel(
     Mean = Mean + pid
     row_mask = pid < M
 
-    _mean = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-    _acc = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-    _count = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-
+    # First pass: compute mean
+    _sum = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
     for off in range(0, N, BLOCK_N):
         cols = off + tl.arange(0, BLOCK_N)[None, :]
         col_mask = cols < N
-        mask = row_mask and col_mask
-        x = tl.load(X + cols, mask, other=0.0).to(tl.float32)
+        mask = row_mask & col_mask
+        x = tl.load(X + cols, mask=mask, other=0.0).to(tl.float32)
+        _sum += x
+    mean = tl.sum(_sum, axis=1) / N  # shape: (BLOCK_M,)
+    mean_2d = mean[:, None]  # shape: (BLOCK_M, 1)
 
-        count = _count + mask
-        cnt = tl.maximum(count, 1)
-        cur_mean = (_mean * _count + x) / cnt
-        _acc += (x - cur_mean) * (x - _mean) * mask
-        _mean = cur_mean
-        _count = count
-
-    # 手动实现 tl.reduce 的功能，沿着 axis=1 进行归约
-    # 使用 tl.sum 来进行归约，这等价于 welford 算法在这种情况下的行为
-
-    # 计算每行的总计数
-    total_count = tl.sum(_count, axis=1)  # shape: (BLOCK_M,)
-
-    # 计算加权平均值
-    weighted_sum = tl.sum(_mean * _count, axis=1)  # shape: (BLOCK_M,)
-    mean = weighted_sum / tl.maximum(total_count, 1)  # shape: (BLOCK_M,)
-
-    # 计算方差累积值
-    # 对于每个元素，计算其对总体方差的贡献
-    mean_expanded = mean[:, None]  # shape: (BLOCK_M, 1)
-
-    # 计算每个局部统计量对总体方差的贡献
-    # 这是 Welford 算法的并行化版本
-    local_var_contrib = _acc + _count * (_mean - mean_expanded) * (
-        _mean - mean_expanded
-    )
-    acc = tl.sum(local_var_contrib, axis=1)  # shape: (BLOCK_M,)
-
+    # Second pass: compute variance
+    _acc = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+    for off in range(0, N, BLOCK_N):
+        cols = off + tl.arange(0, BLOCK_N)[None, :]
+        col_mask = cols < N
+        mask = row_mask & col_mask
+        x = tl.load(X + cols, mask=mask, other=0.0).to(tl.float32)
+        diff = tl.where(col_mask, x - mean_2d, 0.0)
+        _acc += diff * diff
+    acc = tl.sum(_acc, axis=1)  # shape: (BLOCK_M,)
     var = acc / (N - correction)
-    mean = mean[:, None]
-    var = var[:, None]
 
     # Write mean / var
-    tl.store(Mean, mean, row_mask)
-    tl.store(Var, var, row_mask)
+    tl.store(Mean, mean_2d, row_mask)
+    tl.store(Var, var[:, None], row_mask)
 
 
 @libentry()
