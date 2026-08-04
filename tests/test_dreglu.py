@@ -26,11 +26,30 @@ try:
 except ImportError:
     TE_OP = None
 
+def _torch_dreglu(grad_output, input_tensor, quantizer=None):
+    """Pure-PyTorch reference for the backward of ReGLU.
+
+    ReGLU forward:  output = relu(a) * b   (input split along last dim)
+    Backward:
+        grad_a = grad_output * d_relu(a) * b
+        grad_b = grad_output * relu(a)
+    """
+    N = input_tensor.shape[-1] // 2
+    a = input_tensor[..., :N]
+    b = input_tensor[..., N:]
+    relu_a = torch.relu(a)
+    d_relu_a = (a > 0).to(input_tensor.dtype)
+    grad_a = grad_output * d_relu_a * b
+    grad_b = grad_output * relu_a
+    return torch.cat([grad_a, grad_b], dim=-1)
+
+
+REF_OP = TE_OP if TE_OP is not None else _torch_dreglu
+
 
 @pytest.mark.dreglu
 @pytest.mark.parametrize("shape", utils.GLU_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-@pytest.mark.skipif(TE_OP is None, reason="'dreglu' not found in TransformerEngine")
 def test_dreglu(shape, dtype):
     input_tensor = torch.randn(shape, dtype=dtype, device=flag_gems.device)
 
@@ -40,7 +59,7 @@ def test_dreglu(shape, dtype):
         tuple(grad_output_shape), dtype=dtype, device=flag_gems.device
     )
 
-    ref_out = TE_OP(grad_output, input_tensor, None)
+    ref_out = REF_OP(grad_output, input_tensor, None)
     ref_out = utils.to_reference(ref_out)
     with flag_gems.use_gems():
         res_out = flag_gems.dreglu(grad_output, input_tensor, None)
