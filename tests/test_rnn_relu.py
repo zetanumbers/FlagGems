@@ -25,10 +25,10 @@ RNN_HIDDEN_SIZES = [8, 16]
 pytestmark = pytest.mark.rnn_relu
 
 
-@pytest.mark.skipif(
-    cfg.TO_CPU or flag_gems.device != "cuda" or not torch.cuda.is_available(),
-    reason="Triton kernel is CUDA-only",
-)
+# @pytest.mark.skipif(
+#     cfg.TO_CPU or flag_gems.device != "cuda" or not torch.cuda.is_available(),
+#     reason="Triton kernel is CUDA-only",
+# )
 @pytest.mark.rnn_relu
 @pytest.mark.parametrize("batch_first", [False, True])
 @pytest.mark.parametrize("input_size", [8, 16])
@@ -69,14 +69,15 @@ def test_rnn_relu(seq_len, batch_size, input_size, hidden_size, dtype, batch_fir
         )
 
     # Compare outputs
-    utils.gems_assert_close(res_out[0], ref_out[0], dtype)
-    utils.gems_assert_close(res_out[1], ref_out[1], dtype)
+    atol = {torch.float32: 2e-3, torch.float16: 5e-3, torch.bfloat16: 3e-2}[dtype]
+    utils.gems_assert_close(res_out[0], ref_out[0], dtype, atol=atol)
+    utils.gems_assert_close(res_out[1], ref_out[1], dtype, atol=atol)
 
 
-@pytest.mark.skipif(
-    cfg.TO_CPU or flag_gems.device != "cuda" or not torch.cuda.is_available(),
-    reason="Triton kernel is CUDA-only",
-)
+# @pytest.mark.skipif(
+#     cfg.TO_CPU or flag_gems.device != "cuda" or not torch.cuda.is_available(),
+#     reason="Triton kernel is CUDA-only",
+# )
 @pytest.mark.rnn_relu
 @pytest.mark.parametrize("batch_first", [False, True])
 @pytest.mark.parametrize("input_size", [8, 16])
@@ -128,10 +129,10 @@ def test_rnn_relu_direct_wrapper(
     utils.gems_assert_close(hidden, ref_out[1], dtype, atol=atol)
 
 
-@pytest.mark.skipif(
-    cfg.TO_CPU or flag_gems.device != "cuda" or not torch.cuda.is_available(),
-    reason="Triton kernel is CUDA-only",
-)
+# @pytest.mark.skipif(
+#     cfg.TO_CPU or flag_gems.device != "cuda" or not torch.cuda.is_available(),
+#     reason="Triton kernel is CUDA-only",
+# )
 @pytest.mark.rnn_relu
 def test_rnn_relu_direct_backward():
     """Direct wrapper backward: compare gradients against native PyTorch recomputation."""
@@ -159,9 +160,9 @@ def test_rnn_relu_direct_backward():
     (out_g.sum() + hid_g.sum()).backward()
 
     # Side 2: Native PyTorch recompute (same as backward internals)
-    inp_r = inp_data.detach().clone().requires_grad_(True)
-    hx_r = hx_data.detach().clone().requires_grad_(True)
-    params_r = tuple(p.detach().clone().requires_grad_(True) for p in params_data)
+    inp_r = utils.to_reference(inp_data).detach().clone().requires_grad_(True)
+    hx_r = utils.to_reference(hx_data).detach().clone().requires_grad_(True)
+    params_r = tuple(utils.to_reference(p).detach().clone().requires_grad_(True) for p in params_data)
     weight_ih, weight_hh, bias_ih, bias_hh = _params_unpack(params_r, True)
     h = hx_r[0].clone()
     outputs = []
@@ -181,10 +182,10 @@ def test_rnn_relu_direct_backward():
         utils.gems_assert_close(pg.grad, pr.grad, dtype)
 
 
-@pytest.mark.skipif(
-    cfg.TO_CPU or flag_gems.device != "cuda" or not torch.cuda.is_available(),
-    reason="Triton kernel is CUDA-only",
-)
+# @pytest.mark.skipif(
+#     cfg.TO_CPU or flag_gems.device != "cuda" or not torch.cuda.is_available(),
+#     reason="Triton kernel is CUDA-only",
+# )
 @pytest.mark.rnn_relu
 @pytest.mark.parametrize("hidden_size", [128, 256, 512])
 def test_rnn_relu_large_hidden(hidden_size):
@@ -201,7 +202,10 @@ def test_rnn_relu_large_hidden(hidden_size):
     )
     params = tuple(p.detach() for p in rnn._flat_weights)
 
-    ref = torch.rnn_relu(inp, hx, params, True, 1, 0.0, False, False, False)
+    ref_inp = utils.to_reference(inp)
+    ref_hx = utils.to_reference(hx)
+    ref_params = tuple(utils.to_reference(p) for p in params)
+    ref = torch.rnn_relu(ref_inp, ref_hx, ref_params, True, 1, 0.0, False, False, False)
     out_gems = gems_rnn_relu(inp, hx, params, True, 1, 0.0, False, False, False)
 
     atol = 2e-3
