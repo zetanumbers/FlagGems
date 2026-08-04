@@ -21,30 +21,30 @@ from . import accuracy_utils as utils
 from . import conftest as cfg
 
 
-def _init_vllm():
-    if not torch.cuda.is_available():
-        return None, False
-    try:
-        from vllm._custom_ops import apply_repetition_penalties as fn
-
-        t, m = torch.randn(2, 1024, device="cuda"), torch.zeros(
-            2, 1024, dtype=torch.bool, device="cuda"
+def _torch_ref(logits, prompt_mask, output_mask, penalties):
+    for i in range(logits.shape[0]):
+        m = prompt_mask[i] | output_mask[i]
+        logits[i][m] = torch.where(
+            logits[i][m] > 0, logits[i][m] / penalties[i], logits[i][m] * penalties[i]
         )
-        fn(t, m, m, torch.full((2,), 1.2, device="cuda"))
-        return fn, True
-    except (ImportError, RuntimeError):
-
-        def fallback(logits, pm, om, pens):
-            for i in range(logits.shape[0]):
-                m = pm[i] | om[i]
-                logits[i][m] = torch.where(
-                    logits[i][m] > 0, logits[i][m] / pens[i], logits[i][m] * pens[i]
-                )
-
-        return fallback, True
 
 
-_vllm_fn, _VLLM_OK = _init_vllm()
+def _init_ref_fn():
+    if torch.cuda.is_available():
+        try:
+            from vllm._custom_ops import apply_repetition_penalties as fn
+
+            t, m = torch.randn(2, 1024, device="cuda"), torch.zeros(
+                2, 1024, dtype=torch.bool, device="cuda"
+            )
+            fn(t, m, m, torch.full((2,), 1.2, device="cuda"))
+            return fn, True
+        except (ImportError, RuntimeError):
+            pass
+    return _torch_ref, True
+
+
+_ref_fn, _REF_OK = _init_ref_fn()
 
 if cfg.QUICK_MODE:
     _REP_PENALTY_CFG = {
@@ -52,7 +52,7 @@ if cfg.QUICK_MODE:
             (1, 1024),
         ],
         "penalties": [1.0, 1.2],
-        "device": torch.device("cuda:0"),
+        "device": torch.device(flag_gems.device),
     }
 else:
     _REP_PENALTY_CFG = {
@@ -66,14 +66,11 @@ else:
             (8, 8192),
         ],
         "penalties": [1.0, 1.2, 1.5],
-        "device": torch.device("cuda:0"),
+        "device": torch.device(flag_gems.device),
     }
 
 
 @pytest.mark.apply_repetition_penalties
-@pytest.mark.skipif(
-    not _VLLM_OK or not torch.cuda.is_available(), reason="need VLLM+CUDA"
-)
 @pytest.mark.parametrize("shape", _REP_PENALTY_CFG["shapes"])
 @pytest.mark.parametrize("penalty", _REP_PENALTY_CFG["penalties"])
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
@@ -93,9 +90,9 @@ def test_apply_repetition_penalty(shape, penalty, dtype, mask_mode):
 
     penalties = torch.full((shape[0],), penalty, dtype=dtype, device=device)
 
-    logits_vllm = logits.clone()
-    _vllm_fn(logits_vllm, prompt_mask.clone(), output_mask.clone(), penalties.clone())
-    ref = utils.to_reference(logits_vllm, True).to(dtype)
+    logits_ref = logits.clone()
+    _ref_fn(logits_ref, prompt_mask.clone(), output_mask.clone(), penalties.clone())
+    ref = utils.to_reference(logits_ref, True).to(dtype)
 
     with flag_gems.use_gems():
         flag_gems.apply_repetition_penalties(
