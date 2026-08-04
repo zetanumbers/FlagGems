@@ -27,10 +27,11 @@ from . import accuracy_utils as utils
 @pytest.mark.parametrize("hermitian", [False, True])
 def test_linalg_ldl_factor(shape, dtype, hermitian):
     # Create a symmetric positive definite matrix
-    # A = A @ A.T + I ensures positive definiteness
+    # Construct on CPU because NPU doesn't support float64 matmul.
     n = shape[-1]
-    A = torch.randn(shape, dtype=dtype, device=flag_gems.device)
-    A = A @ A.transpose(-2, -1) + torch.eye(n, dtype=dtype, device=flag_gems.device) * n
+    B = torch.randn(shape, dtype=dtype, device="cpu")
+    A = B @ B.transpose(-2, -1) + torch.eye(n, dtype=dtype) * n
+    A = A.to(flag_gems.device)
 
     ref_A = utils.to_reference(A)
 
