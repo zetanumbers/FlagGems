@@ -18,6 +18,7 @@ import pytest
 import torch
 from packaging.version import InvalidVersion, Version
 
+import flag_gems
 from flag_gems.fused import indexer_k_quant_and_cache
 
 from . import accuracy_utils as utils
@@ -28,10 +29,10 @@ _NEXT_VLLM_VERSION = Version("0.21.0")
 
 
 def _is_fp8e4nv_supported():
-    if not torch.cuda.is_available():
-        return False
-    major, minor = torch.cuda.get_device_capability()
-    return major + minor / 10 >= 8.9
+    # if not torch.cuda.is_available():
+    #     return False
+    # major, minor = torch.cuda.get_device_capability()
+    return True
 
 
 # Shape configs for QUICK_MODE
@@ -50,10 +51,10 @@ else:
     ]
 
 pytestmark = [
-    pytest.mark.skipif(
-        not torch.cuda.is_available(),
-        reason="CUDA device required",
-    ),
+    # pytest.mark.skipif(
+    #     not torch.cuda.is_available(),
+    #     reason="CUDA device required",
+    # ),
     pytest.mark.skipif(
         not _is_fp8e4nv_supported(),
         reason="fp8e4nv requires device capability >= 8.9",
@@ -210,7 +211,7 @@ def test_indexer_k_quant_and_cache_matches_reference(
     vllm_op, has_vllm = _load_vllm_cuda_op()
 
     torch.manual_seed(0)
-    device = torch.device("cuda")
+    device = flag_gems.device
     k = torch.randn(num_tokens, head_dim, device=device, dtype=dtype)
     slot_mapping = _make_slot_mapping(num_tokens, num_blocks, block_size, device)
 
@@ -234,6 +235,6 @@ def test_indexer_k_quant_and_cache_matches_reference(
         quant_block_size,
         scale_fmt,
     )
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
 
     utils.gems_assert_equal(gems_cache, utils.to_reference(reference_cache))
