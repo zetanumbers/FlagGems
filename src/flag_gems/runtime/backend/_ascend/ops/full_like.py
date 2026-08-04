@@ -13,14 +13,18 @@
 # limitations under the License.
 
 import logging
-import math
 
 import torch
-import triton
 
 from flag_gems.runtime import torch_device_fn
 
-from .full import check_dtype, full_kernel
+from .full import (
+    SMALL_TENSOR_THRESHOLD,
+    check_dtype,
+    full_func,
+    full_func_scalar,
+    full_kernel
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +47,21 @@ def full_like(
     fill_value = check_dtype(fill_value, dtype, device)
     out = torch.empty_like(x, device=device, dtype=dtype)
     N = x.numel()
-    BLOCK_SIZE = min(triton.next_power_of_2(math.ceil(math.sqrt(N))), 2048)
-    grid_fn = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
-    with torch_device_fn.device(x.device):
-        full_kernel[grid_fn](
-            out,
-            N,
-            fill_value,
-            FILL_VALUE_IS_PTR=isinstance(fill_value, torch.Tensor),
-            BLOCK_SIZE=BLOCK_SIZE,
-        )
+    if N == 0:
+        return out
+    if N < SMALL_TENSOR_THRESHOLD:
+        # Small tensor: use pointwise_dynamic for lower launch overhead
+        if isinstance(fill_value, torch.Tensor):
+            return full_func(out, fill_value, out0=out)
+        else:
+            return full_func_scalar(out, fill_value, out0=out)
+    # Large tensor: use hand-written multi-core kernel
+    if isinstance(fill_value, torch.Tensor):
+        fill_value = fill_value.item()
+    grid = min(40, N)
+    BLOCK_SIZE = (N + grid - 1) // grid
+    SUBBLOCK_SIZE = min(8192, BLOCK_SIZE)
+
+    with torch_device_fn.device(device):
+        full_kernel[grid,](out, N, fill_value, BLOCK_SIZE, SUBBLOCK_SIZE)
     return out

@@ -105,7 +105,7 @@ def convert_fp8(
     "device",
     (
         [flag_gems.device]
-        if flag_gems.vendor_name in ["mthreads", "sunrise"]
+        if flag_gems.vendor_name in ["mthreads", "sunrise", "ascend"]
         else CUDA_DEVICES
     ),
 )
