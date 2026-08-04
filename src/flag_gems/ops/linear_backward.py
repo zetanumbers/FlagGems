@@ -19,7 +19,6 @@ import torch
 
 import flag_gems
 
-from .mm import mm
 from .sum import sum_dim
 
 logger = logging.getLogger(__name__)
@@ -81,12 +80,12 @@ def linear_backward(
     # Shape: (batch, out_features) @ (out_features, in_features) = (batch, in_features)
     if output_mask[0]:
         if input.dtype == torch.float16:
-            grad_input = mm(
+            grad_input = torch.ops.aten.mm(
                 grad_output_flat.to(torch.float32), weight.to(torch.float32)
             )
             grad_input = grad_input.view(*batch_dims, in_features).to(input.dtype)
         else:
-            grad_input = mm(grad_output_flat, weight)
+            grad_input = torch.ops.aten.mm(grad_output_flat, weight)
             grad_input = grad_input.view(*batch_dims, in_features)
 
     # grad_weight = grad_output.T @ input
@@ -94,12 +93,12 @@ def linear_backward(
     if output_mask[1]:
         grad_output_T = grad_output_flat.t().contiguous()
         if weight.dtype == torch.float16:
-            grad_weight = mm(
+            grad_weight = torch.ops.aten.mm(
                 grad_output_T.to(torch.float32), input_flat.to(torch.float32)
             )
             grad_weight = grad_weight.to(weight.dtype)
         else:
-            grad_weight = mm(grad_output_T, input_flat)
+            grad_weight = torch.ops.aten.mm(grad_output_T, input_flat)
 
     # grad_bias = grad_output.sum(dim=0)
     # Shape: (batch, out_features) -> (out_features,)
