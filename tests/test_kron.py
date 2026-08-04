@@ -48,7 +48,9 @@ def test_kron(shape, dtype):
     ref_inp1 = utils.to_reference(inp1)
     ref_inp2 = utils.to_reference(inp2)
 
-    ref_out = torch.kron(ref_inp1, ref_inp2)
+    # Force reference to CPU: kron of high-dim tensors creates intermediate
+    # broadcast tensors with 2*N dims, which exceeds NPU's 8-dimension limit.
+    ref_out = torch.kron(ref_inp1.cpu(), ref_inp2.cpu()).to(flag_gems.device)
     with flag_gems.use_gems():
         res_out = torch.kron(inp1, inp2)
 
