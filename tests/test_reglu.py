@@ -27,14 +27,27 @@ except ImportError:
     TE_OP = None
 
 
+def _torch_reglu(input_tensor, quantizer=None):
+    """Pure-PyTorch reference for the forward of ReGLU.
+
+    ReGLU forward:  output = relu(a) * b   (input split along last dim)
+    """
+    N = input_tensor.shape[-1] // 2
+    a = input_tensor[..., :N]
+    b = input_tensor[..., N:]
+    return torch.relu(a) * b
+
+
+REF_OP = TE_OP if TE_OP is not None else _torch_reglu
+
+
 @pytest.mark.reglu
 @pytest.mark.parametrize("shape", utils.GLU_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-@pytest.mark.skipif(TE_OP is None, reason="'reglu' not found in TransformerEngine")
 def test_reglu(shape, dtype):
     input_tensor = torch.randn(shape, dtype=dtype, device=flag_gems.device)
 
-    ref_out = TE_OP(input_tensor, None)
+    ref_out = REF_OP(input_tensor, None)
     ref_out = utils.to_reference(ref_out)
     with flag_gems.use_gems():
         res_out = flag_gems.reglu(input_tensor)
