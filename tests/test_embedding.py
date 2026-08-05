@@ -106,7 +106,7 @@ def test_embedding_backward(
 
 
 @pytest.mark.embedding_dense_backward
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+@pytest.mark.skipif(not torch.cuda.is_available() and flag_gems.vendor_name != "ascend", reason="CUDA or NPU is required")
 @pytest.mark.skipif(cfg.TO_CPU, reason="Unsupported in CPU mode")
 @pytest.mark.parametrize(
     "Batch, M, N, embeddingsize",
