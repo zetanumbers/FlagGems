@@ -42,7 +42,8 @@ def argmin_kernel_1(
     mask = offset < M
 
     max_value = get_dtype_max(inp.type.element_ty)
-    inp_val = tl.load(inp_ptrs, mask=mask, other=max_value)
+    inp_val = tl.load(inp_ptrs, mask=mask, other=0.0)
+    inp_val = tl.where(mask, inp_val, max_value)
     min_val, min_index = tl.min(inp_val, axis=0, return_indices=True)
     min_index = min_index + pid * BLOCK_SIZE
     mid_value_ptr = mid_value + pid
