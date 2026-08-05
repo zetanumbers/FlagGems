@@ -79,6 +79,21 @@ def setup_flaggems_logging(path=None, record=True, once=False):
     logger.addHandler(handler)
     logger.propagate = False
 
+    # Also attach the same handler to the vendor-specific logger so that
+    # backend ops (e.g. '_ascend.ops.xxx', '_sunrise.ops.xxx') are captured.
+    try:
+        import flag_gems as _fg
+        vendor = getattr(_fg, "vendor_name", None)
+        if vendor:
+            vendor_logger_name = f"_{vendor}"
+            vendor_logger = logging.getLogger(vendor_logger_name)
+            _remove_file_handlers(vendor_logger)
+            vendor_logger.setLevel(logging.DEBUG)
+            vendor_logger.addHandler(handler)
+            vendor_logger.propagate = False
+    except Exception:
+        pass
+
 
 def teardown_flaggems_logging(logger: logging.Logger | None = None):
     """Remove file handlers for the flag_gems logger (used on context exit)."""

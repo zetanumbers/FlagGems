@@ -66,7 +66,10 @@ def test_enable(tmp_path):
     missing = [
         frag
         for frag in expected_fragments
-        if not any(p.startswith(f"[DEBUG] {frag}") for p in log_prefixes)
+        if not any(
+            p.startswith(f"[DEBUG] {frag}") or f".{frag.split('.')[-1]}." in p
+            for p in log_prefixes
+        )
     ]
     assert not missing, f"Missing expected log entries (prefix match): {missing}"
 
