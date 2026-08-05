@@ -14,6 +14,7 @@
 
 import pytest
 import torch
+import flag_gems
 
 import flag_gems.testing as fg_testing
 from flag_gems.fused.deepseek_v4_attention_fused_q_kv_rmsnorm import fused_q_kv_rmsnorm
@@ -48,9 +49,8 @@ def _rmsnorm_ref(x, weight, eps):
     ],
 )
 @pytest.mark.fused_q_kv_rmsnorm
-@pytest.mark.skipif(not _has_cuda(), reason="requires cuda")
 def test_fused_q_kv_rmsnorm_accuracy(tokens, qdim, kvdim):
-    device = "cuda"
+    device = flag_gems.device
     qr = torch.randn((tokens, qdim), device=device, dtype=torch.bfloat16)
     kv = torch.randn((tokens, kvdim), device=device, dtype=torch.bfloat16)
     q_weight = torch.randn((qdim,), device=device, dtype=torch.bfloat16)
@@ -68,12 +68,8 @@ def test_fused_q_kv_rmsnorm_accuracy(tokens, qdim, kvdim):
 
 
 @pytest.mark.fused_q_kv_rmsnorm
-@pytest.mark.skipif(
-    (not _has_cuda()) or (not _HAS_VLLM_FUSED_Q_KV_RMSNORM),
-    reason="requires cuda and vllm deepseek_v4_ops.fused_q_kv_rmsnorm",
-)
 def test_fused_q_kv_rmsnorm_vllm_accuracy():
-    device = "cuda"
+    device = flag_gems.device
     qr = torch.randn((8, 1536), device=device, dtype=torch.bfloat16)
     kv = torch.randn((8, 512), device=device, dtype=torch.bfloat16)
     q_weight = torch.randn((1536,), device=device, dtype=torch.bfloat16)
@@ -81,7 +77,11 @@ def test_fused_q_kv_rmsnorm_vllm_accuracy():
     eps = 1e-6
 
     q_out, kv_out = fused_q_kv_rmsnorm(qr, kv, q_weight, kv_weight, eps)
-    q_expected, kv_expected = vllm_fused_q_kv_rmsnorm(qr, kv, q_weight, kv_weight, eps)
+    if flag_gems.vendor_name == "ascend":
+        q_expected = _rmsnorm_ref(qr, q_weight, eps)
+        kv_expected = _rmsnorm_ref(kv, kv_weight, eps)
+    else:
+        q_expected, kv_expected = vllm_fused_q_kv_rmsnorm(qr, kv, q_weight, kv_weight, eps)
 
     fg_testing.assert_close(q_out, q_expected, dtype=torch.bfloat16, equal_nan=True)
     fg_testing.assert_close(kv_out, kv_expected, dtype=torch.bfloat16, equal_nan=True)
