@@ -29,38 +29,54 @@ logger = logging.getLogger(__name__)
 
 @libentry()
 @triton.jit
-def range_func(y_ptr, start, end, size, BLOCK_SIZE: tl.constexpr):
+def range_func(y_ptr, start, step, size, BLOCK_SIZE: tl.constexpr):
     pid = tle.program_id(0)
     y_ptr += pid * BLOCK_SIZE
     offset = pid * BLOCK_SIZE
 
     cols = tl.arange(0, BLOCK_SIZE)
-    range_val = cols + offset + start
+    range_val = start + (cols + offset) * step
     mask = cols + pid * BLOCK_SIZE
     tl.store(y_ptr + cols, range_val, mask=mask < size)
 
 
-def range(start, end, *, dtype=None, layout=None, device=None, pin_memory=None):
+def range(start, end=None, step=1, *, dtype=None, layout=None, device=None, pin_memory=None):
     logger.debug("GEMS RANGE")
     if dtype == torch.bfloat16:
         raise RuntimeError("torch.range does not support bfloat16 on CUDA")
+    if end is None:
+        end = start
+        start = 0
+
     start = float(start)
     end = float(end)
+    step = float(step)
 
     if dtype is None:
-        # If any of start/end are float, use float64, otherwise int64
-        if isinstance(start, float) or isinstance(end, float):
+        # If any of start/end/step are float, use float64, otherwise int64
+        if any(isinstance(x, float) for x in (start, end, step)):
             dtype = torch.float64
         else:
             dtype = torch.int64
 
-    if dtype in (torch.int32, torch.int64):
+    if dtype in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
         start = int(start)
         end = int(end)
-        size = end - start + 1
+        step = int(step)
+        if step > 0:
+            size = (end - start) // step + 1
+        elif step < 0:
+            size = (start - end) // (-step) + 1
+        else:
+            raise RuntimeError("range step cannot be zero")
     else:
         # Float types
-        size = math.ceil(end - start) + 1
+        if step > 0:
+            size = math.ceil((end - start) / step) + 1
+        elif step < 0:
+            size = math.ceil((start - end) / (-step)) + 1
+        else:
+            raise RuntimeError("range step cannot be zero")
 
     size = int(size)
     if size < 0:
@@ -77,5 +93,5 @@ def range(start, end, *, dtype=None, layout=None, device=None, pin_memory=None):
         device = runtime.device.name
 
     result = torch.empty((size,), device=device, dtype=dtype, pin_memory=pin_memory)
-    range_func[grid,](result, start, end, size, BLOCK_SIZE)
+    range_func[grid,](result, start, step, size, BLOCK_SIZE)
     return result
