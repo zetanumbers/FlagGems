@@ -19,6 +19,21 @@ import flag_gems
 
 from . import accuracy_utils as utils
 
+
+def _native_conv_depthwise2d_ref(input, weight, kernel, bias, stride, padding, dilation):
+    """Native CPU reference for depthwise 2d convolution using F.conv2d."""
+    groups = input.shape[1]
+    stride_h, stride_w = stride
+    pad_h, pad_w = padding
+    dil_h, dil_w = dilation
+
+    inp_4d = input if input.ndim == 4 else input.unsqueeze(0)
+    out = torch.nn.functional.conv2d(
+        inp_4d, weight, bias=bias, stride=(stride_h, stride_w),
+        padding=(pad_h, pad_w), dilation=(dil_h, dil_w), groups=groups,
+    )
+    return out
+
 SHAPE_DEPTHWISE = [
     ((32, 4, 8, 8), (32, 1, 2, 2), (2, 2)),
     ((18, 16, 4, 4), (16, 1, 2, 2), (2, 2)),
@@ -58,7 +73,7 @@ def test_conv_depthwise2d(
         bias_tensor = None
         ref_bias = None
 
-    ref_out = torch.ops.aten._conv_depthwise2d(
+    ref_out = _native_conv_depthwise2d_ref(
         ref_inp,
         ref_weight,
         kernel,
