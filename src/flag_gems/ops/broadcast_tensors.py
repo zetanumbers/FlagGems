@@ -30,7 +30,7 @@ def _compute_broadcast_shape(tensors):
 
     broadcast_shape = []
     for i in range(max_ndim):
-        dim_size = 1
+        dim_size = 0
         for shape in padded_shapes:
             dim_size = max(dim_size, shape[i])
         broadcast_shape.append(dim_size)
