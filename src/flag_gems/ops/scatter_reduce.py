@@ -955,6 +955,7 @@ def scatter_reduce(inp, dim, index, src, reduce, *, include_self=True):
                     out_ncols,
                     dim_2d,
                     use_mask,
+                    bisheng_options='-mllvm --cce-enable-dynamic-misched=true'
                 )
             else:
                 scatter_reduce_sum_kernel[grid](
@@ -989,6 +990,7 @@ def scatter_reduce(inp, dim, index, src, reduce, *, include_self=True):
                     out_strides_p[2],
                     out_strides_p[3],
                     out_strides_p[4],
+                    bisheng_options='-mllvm --cce-enable-dynamic-misched=true'
                 )
         elif reduce == "prod":
             if use_2d:
@@ -1006,6 +1008,7 @@ def scatter_reduce(inp, dim, index, src, reduce, *, include_self=True):
                     out_ncols,
                     dim_2d,
                     use_mask,
+                    bisheng_options='-mllvm --cce-enable-dynamic-misched=true'
                 )
             else:
                 scatter_reduce_prod_kernel[grid](
@@ -1040,6 +1043,7 @@ def scatter_reduce(inp, dim, index, src, reduce, *, include_self=True):
                     out_strides_p[2],
                     out_strides_p[3],
                     out_strides_p[4],
+                    bisheng_options='-mllvm --cce-enable-dynamic-misched=true'
                 )
         elif reduce == "mean":
             if use_2d:
@@ -1058,6 +1062,7 @@ def scatter_reduce(inp, dim, index, src, reduce, *, include_self=True):
                     out_ncols,
                     dim_2d,
                     use_mask,
+                    bisheng_options='-mllvm --cce-enable-dynamic-misched=true'
                 )
             else:
                 scatter_reduce_mean_kernel[grid](
@@ -1093,6 +1098,7 @@ def scatter_reduce(inp, dim, index, src, reduce, *, include_self=True):
                     out_strides_p[2],
                     out_strides_p[3],
                     out_strides_p[4],
+                    bisheng_options='-mllvm --cce-enable-dynamic-misched=true'
                 )
             has_contributions = count > 0
             count = torch.clamp(count, min=1.0)
@@ -1117,6 +1123,7 @@ def scatter_reduce(inp, dim, index, src, reduce, *, include_self=True):
                     reduce == "amax",
                     use_mask,
                     use_cas,
+                    bisheng_options='-mllvm --cce-enable-dynamic-misched=true'
                 )
             else:
                 scatter_reduce_amax_kernel[grid](
@@ -1153,6 +1160,7 @@ def scatter_reduce(inp, dim, index, src, reduce, *, include_self=True):
                     out_strides_p[2],
                     out_strides_p[3],
                     out_strides_p[4],
+                    bisheng_options='-mllvm --cce-enable-dynamic-misched=true'
                 )
 
     if use_mask and reduce != "mean":
