@@ -26,6 +26,11 @@ try:
 except ImportError:
     TE_OP = None
 
+def _pytorch_swiglu(input_tensor: torch.Tensor) -> torch.Tensor:
+    H = input_tensor.shape[-1] // 2
+    x_a = input_tensor[:, :H]
+    x_b = input_tensor[:, H:]
+    return torch.nn.functional.silu(x_a + x_b) * x_b
 
 def generate_input(
     shape: tuple[int, ...], dtype: torch.dtype, device: torch.device
@@ -49,17 +54,19 @@ VALID_POINTWISE_SHAPES = filter_valid_shapes(utils.SWIGLU_SPECIAL_SHAPES)
 @pytest.mark.swiglu
 @pytest.mark.parametrize("shape", VALID_POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-@pytest.mark.skipif(TE_OP is None, reason="'swiglu' not found in TransformerEngine")
 def test_swiglu(shape: tuple[int, ...], dtype: torch.dtype):
     torch.manual_seed(42)
     device = flag_gems.device
 
     input_tensor = generate_input(shape, dtype, device)
 
-    te_forward = TE_OP(input_tensor, quantizer=None).to(device)
-    te_forward = utils.to_reference(te_forward)
+    if TE_OP is not None:
+        ref_forward = TE_OP(input_tensor, quantizer=None).to(device)
+    else:
+        ref_forward = _pytorch_swiglu(input_tensor)
+    ref_forward = utils.to_reference(ref_forward)
 
     with flag_gems.use_gems():
         fg_forward = flag_gems.swiglu(input_tensor, quantizer=None)
 
-    utils.gems_assert_close(fg_forward, te_forward, dtype)
+    utils.gems_assert_close(fg_forward, ref_forward, dtype)
