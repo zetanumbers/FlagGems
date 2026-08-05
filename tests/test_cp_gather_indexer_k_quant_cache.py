@@ -19,6 +19,7 @@ import pytest
 import torch
 from packaging.version import InvalidVersion, Version
 
+import flag_gems
 from flag_gems.fused import cp_gather_indexer_k_quant_cache
 
 from . import accuracy_utils as utils
@@ -27,8 +28,8 @@ _TARGET_VLLM_VERSION = Version("0.20.2")
 _NEXT_VLLM_VERSION = Version("0.21.0")
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(),
-    reason="CUDA device required",
+    flag_gems.device == "cpu",
+    reason="CUDA or NPU device required",
 )
 
 
@@ -194,7 +195,7 @@ def test_cp_gather_indexer_k_quant_cache_matches_reference(
     vllm_op, fp8_dtype, has_vllm = _load_vllm_cuda_op_and_fp8_dtype()
 
     torch.manual_seed(1)
-    device = torch.device("cuda")
+    device = torch.device(flag_gems.device)
     block_table, cu_seqlen, num_blocks = _make_gather_metadata(
         seq_lens,
         block_size,
@@ -253,7 +254,7 @@ def test_cp_gather_indexer_k_quant_cache_matches_reference(
         block_table,
         cu_seqlen,
     )
-    torch.cuda.synchronize()
+    torch.cuda.synchronize() if flag_gems.device == "cuda" else torch.npu.synchronize()
 
     utils.gems_assert_equal(
         gems_k.view(torch.uint8),
