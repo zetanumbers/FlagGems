@@ -28,6 +28,8 @@ NEXTAFTER_DTYPES = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", NEXTAFTER_DTYPES)
 def test_nextafter_(shape, dtype):
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # Test nextafter_: returns the next representable value from x toward y
     x = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     y = torch.randn(shape, dtype=dtype, device=flag_gems.device)
@@ -49,6 +51,8 @@ def test_nextafter_(shape, dtype):
 @pytest.mark.parametrize("dtype", NEXTAFTER_DTYPES)
 def test_nextafter_zero_boundary(dtype):
     """Test +0/-0 crossing: +0 toward -inf => -0, -0 toward +inf => min pos subnormal."""
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # +0.0 toward -1.0 should produce -0.0
     x_pos_zero = torch.zeros(10, dtype=dtype, device=flag_gems.device)
     y_neg = torch.full((10,), -1.0, dtype=dtype, device=flag_gems.device)
@@ -81,6 +85,8 @@ def test_nextafter_zero_boundary(dtype):
 @pytest.mark.parametrize("dtype", NEXTAFTER_DTYPES)
 def test_nextafter_nan(dtype):
     """Test nextafter_ with NaN inputs: IEEE 754 requires NaN propagation."""
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # nextafter(NaN, 1.0) => NaN
     x_nan = torch.tensor(
         [float("nan"), 1.0, 2.0, float("nan")], dtype=dtype, device=flag_gems.device
@@ -117,6 +123,8 @@ def test_nextafter_nan(dtype):
 @pytest.mark.parametrize("dtype", NEXTAFTER_DTYPES)
 def test_nextafter_inf(dtype):
     """Test nextafter_ with Inf inputs."""
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     x = torch.tensor(
         [1.0, float("inf"), float("-inf"), 0.0], dtype=dtype, device=flag_gems.device
     )
@@ -174,6 +182,8 @@ def test_nextafter_finfo_extremes():
 @pytest.mark.parametrize("dtype", NEXTAFTER_DTYPES)
 def test_nextafter_scalar_y(dtype):
     """Test nextafter_ with tensor x and 0-dim tensor y (tests tensor-scalar kernel path)."""
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     x = torch.randn(16, dtype=dtype, device=flag_gems.device)
     scalar_y = torch.tensor(0.5, dtype=dtype, device=flag_gems.device)
 
@@ -191,6 +201,8 @@ def test_nextafter_scalar_y(dtype):
 @pytest.mark.parametrize("dtype", NEXTAFTER_DTYPES)
 def test_nextafter_scalar_x(dtype):
     """Test nextafter_ with scalar x: this goes through Python numpy path."""
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # When x is a scalar Python float, nextafter_ falls back to numpy.nextafter
     # and returns a tensor (consistent with torch op signature)
     scalar_x = 0.5
@@ -214,6 +226,8 @@ def test_nextafter_scalar_x(dtype):
 @pytest.mark.parametrize("dtype", NEXTAFTER_DTYPES)
 def test_nextafter_scalar_nan_y(dtype):
     """Test nextafter_ with tensor x and NaN 0-dim tensor y."""
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     x = torch.ones(8, dtype=dtype, device=flag_gems.device)
     scalar_y = torch.tensor(float("nan"), dtype=dtype, device=flag_gems.device)
 
@@ -233,6 +247,8 @@ def test_nextafter_scalar_nan_y(dtype):
 @pytest.mark.parametrize("dtype", NEXTAFTER_DTYPES)
 def test_nextafter_scalar_inf_y(dtype):
     """Test nextafter_ with tensor x and Inf 0-dim tensor y."""
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     x = torch.ones(8, dtype=dtype, device=flag_gems.device)
     scalar_y = torch.tensor(float("inf"), dtype=dtype, device=flag_gems.device)
 
