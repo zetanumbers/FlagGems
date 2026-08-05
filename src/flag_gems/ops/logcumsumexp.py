@@ -35,27 +35,35 @@ def get_num_sms(idx: int) -> int:
 
 @libentry()
 @triton.jit
-def logcumsumexp_kernel(inp, out, M, N, BLOCK_SIZE: tl.constexpr):
-    """Persistent kernel for logcumsumexp - works for K==1 case (row scan)"""
+def logcumsumexp_kernel(inp, out, M, N, CHUNK_SIZE: tl.constexpr):
+    """Row-wise logcumsumexp with bounded UB usage for K == 1."""
     pid_m = tle.program_id(0)
     row_offset = pid_m * N
 
-    # Load the entire row
-    offsets = tl.arange(0, BLOCK_SIZE)
-    mask = offsets < N
-    x = tl.load(inp + row_offset + offsets, mask=mask, other=float("-inf")).to(
-        tl.float32
-    )
+    # log(sum(exp(x[:chunk_start]))); this scalar makes UB use independent of N.
+    carry = float("-inf")
+    for chunk_start in range(0, N, CHUNK_SIZE):
+        offsets = chunk_start + tl.arange(0, CHUNK_SIZE)
+        mask = offsets < N
+        x = tl.load(
+            inp + row_offset + offsets, mask=mask, other=float("-inf")
+        ).to(tl.float32)
 
-    # Compute logcumsumexp using cumsum with numerical stability
-    # logcumsumexp[i] = log(sum_{j=0}^{i} exp(x[j]))
-    # For stability: subtract max first
-    row_max = tl.max(x)
-    x_shifted = tl.exp(x - row_max)
-    cumsum_exp = tl.cumsum(x_shifted, axis=0)
-    result = row_max + tl.log(cumsum_exp)
+        block_max = tl.max(x, axis=0)
+        local = block_max + tl.log(tl.cumsum(tl.exp(x - block_max), axis=0))
 
-    tl.store(out + row_offset + offsets, result, mask=mask)
+        # logaddexp(carry, local): combine preceding chunks with this chunk.
+        merge_max = tl.maximum(carry, local)
+        result = merge_max + tl.log(
+            tl.exp(carry - merge_max) + tl.exp(local - merge_max)
+        )
+        tl.store(out + row_offset + offsets, result, mask=mask)
+
+        block_total = tl.max(tl.where(mask, local, float("-inf")), axis=0)
+        carry_max = tl.maximum(carry, block_total)
+        carry = carry_max + tl.log(
+            tl.exp(carry - carry_max) + tl.exp(block_total - carry_max)
+        )
 
 
 def logcumsumexp_wrapper(inp, dim=1, dtype=None, out=None):
@@ -81,11 +89,10 @@ def logcumsumexp_wrapper(inp, dim=1, dtype=None, out=None):
 
     with torch_device_fn.device(inp.device):
         if K == 1:  # row scan
-            TILE_SIZE = triton.next_power_of_2(N)
-            # Use more warps for wider rows to keep occupancy up on long scans.
-            num_warps = 8 if TILE_SIZE > 2048 else 4
+            CHUNK_SIZE = 4096
+            num_warps = 4
             logcumsumexp_kernel[(M, 1, 1)](
-                inp, out, M, N, TILE_SIZE, num_warps=num_warps
+                inp, out, M, N, CHUNK_SIZE, num_warps=num_warps
             )
         else:  # column scan (K > 1)
             # For K > 1, each of the M*K rows is independent
@@ -93,12 +100,11 @@ def logcumsumexp_wrapper(inp, dim=1, dtype=None, out=None):
             # Layout: (M, N, K) -> treat as (M*K, N) with K as batch
             # Actually for simplicity, let's handle the K > 1 case with a different approach
             # by processing each (M, K) combination independently
-            TILE_SIZE = triton.next_power_of_2(N)
-            # Use more warps for wider rows to keep occupancy up on long scans.
-            num_warps = 8 if TILE_SIZE > 2048 else 4
+            CHUNK_SIZE = 4096
+            num_warps = 4
             # Grid: (M, K, 1) to process each (m, k) pair independently
             logcumsumexp_kernel_3d[(M, K, 1)](
-                inp, out, M, N, K, TILE_SIZE, num_warps=num_warps
+                inp, out, M, N, K, CHUNK_SIZE, num_warps=num_warps
             )
 
     return out
@@ -106,8 +112,8 @@ def logcumsumexp_wrapper(inp, dim=1, dtype=None, out=None):
 
 @libentry()
 @triton.jit
-def logcumsumexp_kernel_3d(inp, out, M, N, K, BLOCK_SIZE: tl.constexpr):
-    """Kernel for logcumsumexp when K > 1"""
+def logcumsumexp_kernel_3d(inp, out, M, N, K, CHUNK_SIZE: tl.constexpr):
+    """Row-wise strided logcumsumexp with bounded UB usage for K > 1."""
     pid_m = tle.program_id(0)
     pid_k = tle.program_id(1)
 
@@ -119,22 +125,29 @@ def logcumsumexp_kernel_3d(inp, out, M, N, K, BLOCK_SIZE: tl.constexpr):
     # So base offset is m*N*K + k, stride is K
     row_offset = pid_m * N * K + pid_k
 
-    # Load the row with stride K
-    offsets = tl.arange(0, BLOCK_SIZE) * K
-    mask = offsets < N * K
-    # Use pointer arithmetic: inp + row_offset + n*K = inp + row_offset + offsets
-    x = tl.load(inp + row_offset + offsets, mask=mask, other=float("-inf")).to(
-        tl.float32
-    )
+    carry = float("-inf")
+    for chunk_start in range(0, N, CHUNK_SIZE):
+        n = chunk_start + tl.arange(0, CHUNK_SIZE)
+        mask = n < N
+        offsets = n * K
+        x = tl.load(
+            inp + row_offset + offsets, mask=mask, other=float("-inf")
+        ).to(tl.float32)
 
-    # Compute logcumsumexp
-    row_max = tl.max(x)
-    x_shifted = tl.exp(x - row_max)
-    cumsum_exp = tl.cumsum(x_shifted, axis=0)
-    result = row_max + tl.log(cumsum_exp)
+        block_max = tl.max(x, axis=0)
+        local = block_max + tl.log(tl.cumsum(tl.exp(x - block_max), axis=0))
 
-    # Store result
-    tl.store(out + row_offset + offsets, result, mask=mask)
+        merge_max = tl.maximum(carry, local)
+        result = merge_max + tl.log(
+            tl.exp(carry - merge_max) + tl.exp(local - merge_max)
+        )
+        tl.store(out + row_offset + offsets, result, mask=mask)
+
+        block_total = tl.max(tl.where(mask, local, float("-inf")), axis=0)
+        carry_max = tl.maximum(carry, block_total)
+        carry = carry_max + tl.log(
+            tl.exp(carry - carry_max) + tl.exp(block_total - carry_max)
+        )
 
 
 def logcumsumexp(inp, dim=1, *, dtype=None):
