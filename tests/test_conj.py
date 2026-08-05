@@ -26,6 +26,8 @@ from . import accuracy_utils as utils
 @pytest.mark.parametrize("dtype", utils.COMPLEX_DTYPES)
 def test_conj(shape, dtype):
     # Create complex input
+    if flag_gems.vendor_name == "ascend" and dtype == torch.complex32:
+        pytest.skip("Issues #3267: Ascend NPU does not support complex32 dtype")
     real = torch.randn(shape, dtype=torch.float32, device=flag_gems.device)
     imag = torch.randn(shape, dtype=torch.float32, device=flag_gems.device)
     inp = torch.complex(real, imag).to(dtype)
