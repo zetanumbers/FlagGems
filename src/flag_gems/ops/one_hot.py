@@ -18,6 +18,8 @@ import torch
 import triton
 import triton.language as tl
 
+import flag_gems
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,7 +51,7 @@ def one_hot_kernel(
 
 def one_hot(tensor: torch.Tensor, num_classes: int = -1) -> torch.Tensor:
     logger.debug("GEMS ONE_HOT")
-    if not tensor.is_cuda:
+    if tensor.device.type != flag_gems.device:
         return torch.nn.functional.one_hot(tensor, num_classes)
     if not tensor.is_contiguous():
         tensor = tensor.contiguous()
