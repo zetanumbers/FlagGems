@@ -213,6 +213,9 @@ def generate_destination_passing_repeat_wrapper(
                 code.writeline("tile_size=tile_size,")
                 code.writeline("one_tile_per_cta=tiles_per_cta==1,")
             code.writeline("num_warps=num_warps,")
+            code.writeline(
+                "bisheng_options='-mllvm --cce-enable-dynamic-misched=true',"
+            )
         code.writeline(")")
 
         # return
