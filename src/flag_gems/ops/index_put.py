@@ -175,6 +175,8 @@ def generate_index_put_wrapper(
         code.writeline("values_stride = values.stride()")
         code.writeline("M = indices[0].numel()")
         code.writeline(f"N = volume(input_shape[{indices_len}: ])")
+        code.writeline("bisheng_options='-mllvm --cce-enable-dynamic-misched=true',")
+
         code.newline()
         code.writeline("grid = lambda meta: (")
         with code.indent():
