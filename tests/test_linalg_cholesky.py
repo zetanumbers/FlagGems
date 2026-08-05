@@ -25,6 +25,8 @@ from . import accuracy_utils as utils
 # Cholesky only supports float32/float64; fp16/bf16 not supported by PyTorch
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_linalg_cholesky(shape, dtype):
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # Create a positive-definite matrix: A = B @ B^T + I
     # Construct on CPU because NPU doesn't support float64 matmul.
     n = shape[-1]
@@ -46,6 +48,8 @@ def test_linalg_cholesky(shape, dtype):
 # Cholesky only supports float32/float64; fp16/bf16 not supported by PyTorch
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_linalg_cholesky_upper(shape, dtype):
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # Test with upper=True
     n = shape[-1]
     B = torch.randn(shape, dtype=dtype, device="cpu")
@@ -65,6 +69,8 @@ def test_linalg_cholesky_upper(shape, dtype):
 # Cholesky only supports float32/float64; fp16/bf16 not supported by PyTorch
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_linalg_cholesky_batch(shape, dtype):
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # Create positive-definite matrices for batched input: A = B @ B^T + I
     n = shape[-1]
     B = torch.randn(shape, dtype=dtype, device="cpu")

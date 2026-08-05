@@ -26,6 +26,8 @@ from . import accuracy_utils as utils
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 @pytest.mark.parametrize("hermitian", [False, True])
 def test_linalg_ldl_factor(shape, dtype, hermitian):
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # Create a symmetric positive definite matrix
     # Construct on CPU because NPU doesn't support float64 matmul.
     n = shape[-1]
