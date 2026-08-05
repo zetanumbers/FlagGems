@@ -65,7 +65,8 @@ def argmin_kernel_2(
     mid_ptrs = mid_value + offset
     mask = offset < mid_size
     max_value = get_dtype_max(mid_value.type.element_ty)
-    mid_val = tl.load(mid_ptrs, mask=mask, other=max_value)
+    mid_val = tl.load(mid_ptrs, mask=mask, other=0.0)
+    mid_val = tl.where(mask, mid_val, max_value)
     index_val = tl.argmin(mid_val, axis=0)
     mid_index_ptrs = mid_index + index_val
     out_val = tl.load(mid_index_ptrs)
@@ -106,7 +107,8 @@ def argmin_kernel(
         offset = m_offset[:, None] * N * K + n_offset[None, :] * K + pid_k
         mask = (m_offset[:, None] < M) & (n_offset[None, :] < N)
         inp_ptrs = inp + offset
-        inp_vals = tl.load(inp_ptrs, mask=mask, other=max_value)
+        inp_vals = tl.load(inp_ptrs, mask=mask, other=0.0)
+        inp_vals = tl.where(mask, inp_vals, max_value).to(acc_type)
         local_min, local_argmin = tl.min(
             inp_vals, 1, return_indices=True, return_indices_tie_break_left=True
         )
