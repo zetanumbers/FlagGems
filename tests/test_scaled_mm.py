@@ -21,10 +21,10 @@ import flag_gems
 from . import accuracy_utils as utils
 from .conftest import QUICK_MODE
 
-pytestmark = pytest.mark.skipif(
-    flag_gems.vendor_name in ["ascend"],
-    reason="https://github.com/flagos-ai/FlagGems/issues/3387",
-)
+# pytestmark = pytest.mark.skipif(
+#     flag_gems.vendor_name in ["ascend"],
+#     reason="https://github.com/flagos-ai/FlagGems/issues/3387",
+# )
 
 if QUICK_MODE:
     SCALED_MM_SHAPES = [(16, 16, 16)]

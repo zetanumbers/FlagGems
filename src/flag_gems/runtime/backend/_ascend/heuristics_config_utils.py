@@ -236,7 +236,7 @@ def vdot_heur_block_size(args):
 
 
 def mm_heur_even_k(args):
-    return args["K"] % (args["BLOCK_K"] * args["SPLIT_K"]) == 0
+    return args["K"] % (args["BLOCK_K"] * args.get("SPLIT_K", 1)) == 0
 
 
 HEURISTICS_CONFIGS = {

@@ -24,9 +24,12 @@ if utils.fp64_is_supported:
 
 
 def _make_ldl_inputs(batch_shape, n, k, dtype, device):
-    A = torch.randn(*batch_shape, n, n, dtype=dtype, device=device)
-    A = A @ A.mT + torch.eye(n, dtype=dtype, device=device) * n
-    B = torch.randn(*batch_shape, n, k, dtype=dtype, device=device)
+    # Construct on CPU: NPU doesn't support randn for complex64 or matmul for float64.
+    A = torch.randn(*batch_shape, n, n, dtype=dtype, device="cpu")
+    A = A @ A.mT + torch.eye(n, dtype=dtype) * n
+    B = torch.randn(*batch_shape, n, k, dtype=dtype, device="cpu")
+    A = A.to(device)
+    B = B.to(device)
     return A, B
 
 
@@ -58,7 +61,7 @@ def test_linalg_ldl_solve(shape, dtype):
     with flag_gems.use_gems():
         res_out = torch.linalg.ldl_solve(LD, pivots, B)
 
-    _assert_ldl_close(res_out, ref_out, dtype)
+    _assert_ldl_close(res_out.cpu(), ref_out.cpu(), dtype)
 
 
 @pytest.mark.linalg_ldl_solve
@@ -82,4 +85,4 @@ def test_linalg_ldl_solve_batched(shape, dtype):
     with flag_gems.use_gems():
         res_out = torch.linalg.ldl_solve(LD, pivots, B)
 
-    _assert_ldl_close(res_out, ref_out, dtype)
+    _assert_ldl_close(res_out.cpu(), ref_out.cpu(), dtype)
