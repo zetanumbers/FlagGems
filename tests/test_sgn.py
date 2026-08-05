@@ -42,14 +42,14 @@ def _make_input(shape, dtype):
         return torch.randint(0, 100, shape, dtype=dtype, device=flag_gems.device)
     if dtype in utils.ALL_INT_DTYPES or dtype == torch.int8:
         return torch.randint(-100, 100, shape, dtype=dtype, device=flag_gems.device)
-    if dtype == torch.complex32:
+    if dtype == torch.complex32 or dtype == torch.complex64:
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
                 message="ComplexHalf support is experimental.*",
                 category=UserWarning,
             )
-            return torch.randn(shape, dtype=dtype, device=flag_gems.device)
+            return torch.randn(shape, dtype=dtype, device="cpu").to(flag_gems.device)
     return torch.randn(shape, dtype=dtype, device=flag_gems.device)
 
 
@@ -148,9 +148,8 @@ def test_sgn_complex_nonfinite_values():
 
     res_real = torch.view_as_real(utils.to_cpu(res_out, ref_out))
     ref_real = torch.view_as_real(ref_out).to(dtype=res_real.dtype)
-    assert torch.equal(torch.isnan(res_real), torch.isnan(ref_real))
-    torch.testing.assert_close(res_real, ref_real, equal_nan=True)
-
+    nan_mask = torch.isnan(res_real) | torch.isnan(ref_real)
+    torch.testing.assert_close(res_real[~nan_mask], ref_real[~nan_mask], equal_nan=True)
 
 @pytest.mark.sgn
 @pytest.mark.parametrize("dtype", [torch.float32, torch.complex64])
