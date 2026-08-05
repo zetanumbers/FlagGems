@@ -27,6 +27,24 @@ except ImportError:
     TE_OP = None
 
 
+def _native_dswiglu(grad_output, input_tensor, quantizer=None):
+    """Native PyTorch reference for dswiglu (SwiGLU backward)."""
+    H = input_tensor.shape[-1] // 2
+    x_a = input_tensor[..., :H].to(torch.float32)
+    x_b = input_tensor[..., H:].to(torch.float32)
+    grad_out = grad_output.to(torch.float32)
+
+    sig = torch.sigmoid(x_a)
+    silu = x_a * sig
+    d_silu = sig + x_a * sig * (1 - sig)
+
+    grad_a = grad_out * x_b * d_silu
+    grad_b = grad_out * silu
+
+    return torch.cat([grad_a, grad_b], dim=-1).to(input_tensor.dtype)
+
+
+
 def generate_input(
     shape: tuple[int, ...], dtype: torch.dtype, device: torch.device
 ) -> torch.Tensor:
@@ -47,7 +65,6 @@ VALID_POINTWISE_SHAPES = filter_valid_shapes(utils.SWIGLU_SPECIAL_SHAPES)
 
 
 @pytest.mark.dswiglu
-@pytest.mark.skipif(TE_OP is None, reason="'dswiglu' not found in TransformerEngine")
 @pytest.mark.parametrize("shape", VALID_POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
 def test_dswiglu(shape: tuple[int, ...], dtype: torch.dtype):
@@ -60,10 +77,14 @@ def test_dswiglu(shape: tuple[int, ...], dtype: torch.dtype):
     grad_shape[-1] = grad_shape[-1] // 2
     grad_output = generate_input(tuple(grad_shape), dtype, device)
 
-    te_grad_input = TE_OP(grad_output, input_tensor, quantizer=None).to(device)
-    te_grad_input = utils.to_reference(te_grad_input)
+    if TE_OP is None:
+        ref_grad_input = _native_dswiglu(grad_output, input_tensor)
+        ref_grad_input = utils.to_reference(ref_grad_input)
+    else:
+        ref_grad_input = TE_OP(grad_output, input_tensor, quantizer=None).to(device)
+        ref_grad_input = utils.to_reference(ref_grad_input)
 
     with flag_gems.use_gems():
         fg_grad_input = flag_gems.dswiglu(grad_output, input_tensor, quantizer=None)
 
-    utils.gems_assert_close(fg_grad_input, te_grad_input, dtype)
+    utils.gems_assert_close(fg_grad_input, ref_grad_input, dtype)
