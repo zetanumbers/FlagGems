@@ -10,6 +10,8 @@ from . import accuracy_utils as utils
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_igamma_(shape, dtype):
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     inp = torch.rand(shape, dtype=dtype, device=flag_gems.device) + 1.0
     other = torch.rand(shape, dtype=dtype, device=flag_gems.device) + 1.0
     ref_inp = utils.to_reference(inp.clone())
