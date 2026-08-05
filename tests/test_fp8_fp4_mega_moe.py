@@ -44,7 +44,12 @@ TEST_SHAPES = [
 
 
 def _has_native_fp8():
-    return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 9
+    if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 9:
+        return True
+    # NPU supports FP8 via load+cast in Triton kernels
+    if flag_gems.device == "npu":
+        return True
+    return False
 
 
 def _pack_fp4_e2m1(x):
