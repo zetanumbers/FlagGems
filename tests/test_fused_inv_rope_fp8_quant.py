@@ -183,15 +183,13 @@ def _unfused_inv_rope_fp8_quant(
     quant_group_size=QUANT_GROUP_SIZE,
     tma_aligned_scales=False,
 ):
-    cos = cos_sin_cache[:, : rope_dim // 2]
-    sin = -cos_sin_cache[:, rope_dim // 2 :]
-
-    o_nope = o[..., :nope_dim]
-    o_rope = o[..., nope_dim:]
-    o_rope_rot, _ = flag_gems.apply_rotary_pos_emb(
-        o_rope, o_rope, cos, sin, position_ids=positions, rotary_interleaved=True
+    o_rot = _reference_inv_rope(
+        o,
+        positions,
+        cos_sin_cache,
+        nope_dim=nope_dim,
+        rope_dim=rope_dim,
     )
-    o_rot = torch.cat((o_nope, o_rope_rot), dim=-1)
 
     num_tokens = o.shape[0]
     d = heads_per_group * o.shape[-1]
