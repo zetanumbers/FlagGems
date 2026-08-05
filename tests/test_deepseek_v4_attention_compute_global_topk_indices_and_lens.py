@@ -15,6 +15,7 @@
 import pytest
 import torch
 
+import flag_gems
 import flag_gems.testing as fg_testing
 from flag_gems.fused.deepseek_v4_attention_compute_global_topk_indices_and_lens import (
     compute_global_topk_indices_and_lens,
@@ -29,6 +30,32 @@ try:
 except Exception:
     vllm_compute_global_topk_indices_and_lens = None
     _HAS_VLLM_COMPUTE_GLOBAL_TOPK_INDICES_AND_LENS = False
+
+
+def _native_compute_global_topk_indices_and_lens(
+    topk_indices, token_to_req_indices, block_table, block_size, is_valid_token,
+):
+    """Native PyTorch reference for compute_global_topk_indices_and_lens."""
+    num_tokens, topk_cols = topk_indices.shape
+    global_indices = torch.full_like(topk_indices, -1)
+    lens = torch.zeros((num_tokens,), device=topk_indices.device, dtype=torch.int32)
+    for token in range(num_tokens):
+        req = int(token_to_req_indices[token].item())
+        count = 0
+        for i in range(topk_cols):
+            local = int(topk_indices[token, i].item())
+            if local >= 0:
+                block_idx = local // block_size
+                block_off = local % block_size
+                global_indices[token, i] = (
+                    block_table[req, block_idx] * block_size + block_off
+                )
+                count += 1
+        lens[token] = count if int(is_valid_token[token].item()) else 0
+    return global_indices, lens
+
+
+vllm_compute_global_topk_indices_and_lens = vllm_compute_global_topk_indices_and_lens or _native_compute_global_topk_indices_and_lens
 
 
 @pytest.mark.parametrize(
@@ -51,11 +78,10 @@ except Exception:
     ],
 )
 @pytest.mark.compute_global_topk_indices_and_lens
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires cuda")
 def test_compute_global_topk_indices_and_lens_accuracy(
     topk_values, req_values, block_table_values, valid_values, block_size
 ):
-    device = "cuda"
+    device = flag_gems.device
     topk_indices = torch.tensor(topk_values, device=device, dtype=torch.int32)
     token_to_req_indices = torch.tensor(req_values, device=device, dtype=torch.int32)
     block_table = torch.tensor(block_table_values, device=device, dtype=torch.int32)
@@ -88,13 +114,8 @@ def test_compute_global_topk_indices_and_lens_accuracy(
 
 
 @pytest.mark.compute_global_topk_indices_and_lens
-@pytest.mark.skipif(
-    (not torch.cuda.is_available())
-    or (not _HAS_VLLM_COMPUTE_GLOBAL_TOPK_INDICES_AND_LENS),
-    reason="requires cuda and vllm deepseek_v4_ops.compute_global_topk_indices_and_lens",
-)
 def test_compute_global_topk_indices_and_lens_vllm_accuracy():
-    device = "cuda"
+    device = flag_gems.device
     topk_indices = torch.tensor(
         [[0, 63, 64, 127], [128, -1, 191, 255], [7, 8, -1, -1]],
         device=device,
