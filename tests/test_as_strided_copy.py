@@ -29,6 +29,11 @@ FLOAT8_DTYPES = [
     for dtype_name in ("float8_e4m3fn", "float8_e5m2", "float8_e8m0fnu")
     if hasattr(torch, dtype_name)
 ]
+# NPU AICPU does not support float8_e8m0fnu (causes device exception)
+if flag_gems.vendor_name == "ascend":
+    FLOAT8_DTYPES = [
+        d for d in FLOAT8_DTYPES if d != getattr(torch, "float8_e8m0fnu", None)
+    ]
 
 if cfg.QUICK_MODE:
     AS_STRIDED_COPY_CASES = [
@@ -180,16 +185,16 @@ def test_accuracy_as_strided_copy_out_dtype_mismatch_raises():
 
 @pytest.mark.as_strided_copy
 @pytest.mark.skipif(
-    flag_gems.device != "cuda" or not FLOAT8_DTYPES,
-    reason="float8 accuracy coverage requires CUDA and PyTorch float8 support",
+    not FLOAT8_DTYPES,
+    reason="float8 accuracy coverage requires PyTorch float8 support",
 )
 @pytest.mark.skipif(
     flag_gems.vendor_name == "tsingmicro", reason="Issue #4131: not working"
 )
 @pytest.mark.parametrize("dtype", FLOAT8_DTYPES)
 def test_accuracy_as_strided_copy_float8_byte_path(dtype):
-    inp = torch.arange(24, dtype=torch.uint8, device=flag_gems.device).reshape(4, 6)
-    inp = inp.view(dtype)
+    inp = torch.arange(24, dtype=torch.uint8, device="cpu").reshape(4, 6)
+    inp = inp.to(flag_gems.device).view(dtype)
     ref_inp = utils.to_reference(inp)
     ref_out = torch.ops.aten.as_strided_copy(ref_inp, (2, 3), (1, 6), 0)
 
@@ -201,16 +206,16 @@ def test_accuracy_as_strided_copy_float8_byte_path(dtype):
 
 @pytest.mark.as_strided_copy_out
 @pytest.mark.skipif(
-    flag_gems.device != "cuda" or not FLOAT8_DTYPES,
-    reason="float8 accuracy coverage requires CUDA and PyTorch float8 support",
+    not FLOAT8_DTYPES,
+    reason="float8 accuracy coverage requires PyTorch float8 support",
 )
 @pytest.mark.skipif(
     flag_gems.vendor_name == "tsingmicro", reason="Issue #4131: not working"
 )
 @pytest.mark.parametrize("dtype", FLOAT8_DTYPES)
 def test_accuracy_as_strided_copy_out_float8_byte_path(dtype):
-    inp = torch.arange(24, dtype=torch.uint8, device=flag_gems.device).reshape(4, 6)
-    inp = inp.view(dtype)
+    inp = torch.arange(24, dtype=torch.uint8, device="cpu").reshape(4, 6)
+    inp = inp.to(flag_gems.device).view(dtype)
     ref_inp = utils.to_reference(inp)
     ref_out_buf = torch.empty((2, 3), dtype=dtype, device=ref_inp.device)
     res_out_buf = torch.empty((2, 3), dtype=dtype, device=flag_gems.device)
