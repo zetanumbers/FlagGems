@@ -28,9 +28,9 @@ except ImportError:
 
 def _pytorch_swiglu(input_tensor: torch.Tensor) -> torch.Tensor:
     H = input_tensor.shape[-1] // 2
-    x_a = input_tensor[:, :H]
-    x_b = input_tensor[:, H:]
-    return torch.nn.functional.silu(x_a + x_b) * x_b
+    x_a = input_tensor[..., :H]
+    x_b = input_tensor[..., H:]
+    return torch.nn.functional.silu(x_a) * x_b
 
 def generate_input(
     shape: tuple[int, ...], dtype: torch.dtype, device: torch.device
