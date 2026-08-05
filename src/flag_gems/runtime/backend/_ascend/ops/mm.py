@@ -51,8 +51,8 @@ def mm_kernel(
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
     GROUP_M: tl.constexpr,
-    SPLIT_K: tl.constexpr,
     EVEN_K: tl.constexpr,
+    SPLIT_K: tl.constexpr = 1,
 ):
     pid = tl.program_id(0)
     pid_z = tl.program_id(1)

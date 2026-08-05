@@ -95,17 +95,14 @@ mm:
     BLOCK_M: 16
     BLOCK_N: 32
     BLOCK_K: 32
-    SPLIT_K: 1
 - META:
     BLOCK_M: 128
     BLOCK_N: 128
     BLOCK_K: 128
-    SPLIT_K: 1
 - META:
     BLOCK_M: 256
     BLOCK_N: 256
     BLOCK_K: 256
-    SPLIT_K: 1
 
 scaled_mm:
 - META:
