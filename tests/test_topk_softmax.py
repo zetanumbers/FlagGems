@@ -44,23 +44,23 @@ def torch_topk_softmax(
 
     weights = torch.empty_like(topk_weights, dtype=torch.float32)
     indices = torch.empty_like(topk_indices, dtype=torch.int64)
-    topk_expert = torch.empty_like(token_expert_indices, dtype=torch.int32)
+    topken_expert = torch.empty_like(token_expert_indices, dtype=torch.int32)
 
     selected_sum = torch.zeros(num_tokens, dtype=torch.float32, device=probs.device)
     for ki in range(k):
         curr_max, curr_arg = probs.max(dim=-1)
         weights[:, ki] = curr_max
         indices[:, ki] = curr_arg.to(torch.int64)
-        topk_expert[:, ki] = (ki * num_tokens + torch.arange(num_experts, device=probs.device, dtype=torch.int32)).to(torch.int32)
+        topken_expert[:, ki] = (ki * num_tokens + torch.arange(num_tokens, device=probs.device, dtype=torch.int32)).to(torch.int32)
         if renormalize:
             selected_sum = selected_sum + curr_max
         probs[torch.arange(num_tokens, device=probs.device), curr_arg] = float("-inf")
     if renormalize:
         norm = selected_sum + 1e-8
-        weights = weights / norm.unqueeze(-1)
+        weights = weights / norm.unsqueeze(-1)
     topk_weights.copy_(weights.to(topk_weights.dtype))
     topk_indices.copy_(indices.to(topk_indices.dtype))
-    token_expert_indices.copy_(topk_expert.to(token_expert_indices.dtype))
+    token_expert_indices.copy_(topken_expert.to(token_expert_indices.dtype))
 
 def generate_test_params():
     params = [torch.int32, torch.int64]
