@@ -119,7 +119,7 @@ def special_modified_bessel_k0_kernel(
 
 
 def _launch_special_modified_bessel_k0(x: torch.Tensor, out: torch.Tensor):
-    assert x.is_cuda and out.is_cuda, "Tensors must be CUDA tensors"
+    # assert x.is_cuda and out.is_cuda, "Tensors must be CUDA tensors"
     assert (
         x.numel() == out.numel()
     ), "Input and output must have the same number of elements"
