@@ -16,7 +16,7 @@ def test_float_power_(shape, dtype):
     inp1 = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     inp2 = torch.randn(shape, dtype=dtype, device=flag_gems.device)
 
-    if flag_gems.vendor_name == "kunlunxin":
+    if flag_gems.vendor_name == "kunlunxin" or flag_gems.vendor_name == "ascend":
         inp1 = inp1.uniform_(-1, 1)
         inp2 = inp2.uniform_(-1, 1)
 
@@ -44,7 +44,7 @@ def test_float_power_scalar(shape, dtype):
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     scalar = 2.0
 
-    if flag_gems.vendor_name == "kunlunxin":
+    if flag_gems.vendor_name == "kunlunxin" or flag_gems.vendor_name == "ascend":
         inp = inp.uniform_(-1, 1)
 
     ref_inp = utils.to_reference(inp.clone(), True)
