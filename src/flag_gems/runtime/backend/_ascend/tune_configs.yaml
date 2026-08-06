@@ -905,3 +905,16 @@ index_adjacent_ascend:
     BLOCK_S: 8192
     LAYOUT: 1
     SUFFIX_TILES_PER_PROGRAM: 32
+fp8_mqa_logits:
+- META:
+    BLOCK_M: 4
+    BLOCK_N: 128
+    BLOCK_D: 128
+  num_warps: 4
+  num_stages: 1
+- META:
+    BLOCK_M: 8
+    BLOCK_N: 128
+    BLOCK_D: 128
+  num_warps: 4
+  num_stages: 1
