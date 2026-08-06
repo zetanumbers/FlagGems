@@ -25,10 +25,18 @@ from flag_gems.utils import libentry, tl_extra_shim
 logger = logging.getLogger(__name__)
 
 
+def _prune_renorm_configs(configs, named_args, **kwargs):
+    """Discard configurations that cannot cover a complete reduction row."""
+    n = named_args["N"]
+    return [config for config in configs if config.kwargs["BLOCK_SIZE"] >= n]
+
+
 @libentry()
 @triton.autotune(
     configs=runtime.get_tuned_config("renorm_"),
     key=["N"],
+    prune_configs_by={"early_config_prune": _prune_renorm_configs},
+    restore_value=["X"],
 )
 @triton.jit(do_not_specialize=["p", "maxnorm"])
 def renorm_kernel(X, N, p, maxnorm, BLOCK_SIZE: tl.constexpr):
