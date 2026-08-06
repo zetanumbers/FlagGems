@@ -25,11 +25,12 @@ from . import accuracy_utils as utils
 # special.hermite_polynomial_h reference only supports float32 and float64
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_special_hermite_polynomial_h(shape, dtype):
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     # Test with tensor n in [0, 9]
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     n = torch.randint(0, 10, (1,), device=flag_gems.device).squeeze()
-    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
-        pytest.skip("Currently, Ascend does not support float64.")
+
     ref_inp = utils.to_reference(inp, True)
 
     ref_out = torch.special.hermite_polynomial_h(ref_inp, utils.to_reference(n, True))
