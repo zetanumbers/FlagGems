@@ -27,6 +27,41 @@ from . import accuracy_utils as utils
 random.seed(time.time() // 100)
 
 
+def torch_topk_softmax(
+        topk_weights: torch.Tensor,
+        topk_indices: torch.Tensor,
+        token_expert_indices: torch.Tensor,
+        gating_output: torch.Tensor,
+        renormalize: bool = False,
+) -> None:
+    num_tokens, num_experts = gating_output.shape
+    k = topk_weights.size(-1)
+
+    logits = gating_output.to(torch.float32)
+    row_max = logits.max(dim=-1, keepdim=True).values
+    exp_vals = torch.exp(logits - row_max)
+    probs = exp_vals / (exp_vals.sum(dim=-1, keepdim=True) + 1e-8)
+
+    weights = torch.empty_like(topk_weights, dtype=torch.float32)
+    indices = torch.empty_like(topk_indices, dtype=torch.int64)
+    topk_expert = torch.empty_like(token_expert_indices, dtype=torch.int32)
+
+    selected_sum = torch.zeros(num_tokens, dtype=torch.float32, device=probs.device)
+    for ki in range(k):
+        curr_max, curr_arg = probs.max(dim=-1)
+        weights[:, ki] = curr_max
+        indices[:, ki] = curr_arg.to(torch.int64)
+        topk_expert[:, ki] = (ki * num_tokens + torch.arange(num_experts, device=probs.device, dtype=torch.int32)).to(torch.int32)
+        if renormalize:
+            selected_sum = selected_sum + curr_max
+        probs[torch.arange(num_tokens, device=probs.device), curr_arg] = float("-inf")
+    if renormalize:
+        norm = selected_sum + 1e-8
+        weights = weights / norm.unqueeze(-1)
+    topk_weights.copy_(weights.to(topk_weights.dtype))
+    topk_indices.copy_(indices.to(topk_indices.dtype))
+    token_expert_indices.copy_(topk_expert.to(token_expert_indices.dtype))
+
 def generate_test_params():
     params = [torch.int32, torch.int64]
     if utils.SkipVersion("torch", ">2.2"):
@@ -62,11 +97,6 @@ def test_topk_softmax(
         # Issue #2858: torch musa does not support uint32
         index_dtype = torch.int64
 
-    try:
-        from vllm._custom_ops import topk_softmax as vllm_topk_softmax
-    except (ImportError, AttributeError):
-        pytest.skip("vLLM topk_softmax not available")
-
     torch.manual_seed(42)
     device = flag_gems.device
 
@@ -74,21 +104,21 @@ def test_topk_softmax(
         num_tokens, num_experts, dtype=torch.float32, device=device
     )
 
-    vllm_weights = torch.empty(num_tokens, topk, device=device, dtype=torch.float32)
-    vllm_indices = torch.empty(num_tokens, topk, device=device, dtype=index_dtype)
-    vllm_token_expert = torch.empty(num_tokens, topk, device=device, dtype=torch.int32)
+    ref_weights = torch.empty(num_tokens, topk, device=device, dtype=torch.float32)
+    ref_indices = torch.empty(num_tokens, topk, device=device, dtype=index_dtype)
+    ref_token_expert = torch.empty(num_tokens, topk, device=device, dtype=torch.int32)
 
-    vllm_topk_softmax(
-        vllm_weights,
-        vllm_indices,
-        vllm_token_expert,
+    torch_topk_softmax(
+        ref_weights,
+        ref_indices,
+        ref_token_expert,
         gating_output,
         renormalize,
     )
 
-    gems_weights = torch.empty_like(vllm_weights)
-    gems_indices = torch.empty_like(vllm_indices)
-    gems_token_expert = torch.empty_like(vllm_token_expert)
+    gems_weights = torch.empty_like(ref_weights)
+    gems_indices = torch.empty_like(ref_indices)
+    gems_token_expert = torch.empty_like(ref_token_expert)
 
     topk_softmax(
         gems_weights,
@@ -99,13 +129,13 @@ def test_topk_softmax(
     )
 
     assert torch.allclose(
-        gems_weights, vllm_weights, atol=1e-5
+        gems_weights, ref_weights, atol=1e-5
     ), "topk_weights mismatch"
     assert torch.equal(
-        gems_indices.cpu(), vllm_indices.cpu()
+        gems_indices.cpu(), ref_indices.cpu()
     ), "topk_indices mismatch (fp32)"
     assert torch.equal(
-        gems_token_expert.cpu(), vllm_token_expert.cpu()
+        gems_token_expert.cpu(), ref_token_expert.cpu()
     ), "token_expert_indices mismatch"
 
     if renormalize:
