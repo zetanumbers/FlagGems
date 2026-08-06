@@ -143,6 +143,9 @@ def test_copy_inplace_float8_e8m0fnu(shape):
 @pytest.mark.skipif(
     flag_gems.vendor_name == "tsingmicro", reason="Issue #4131: not working"
 )
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend", reason="Ascend does not support float8_e8m0fnu to float32"
+)
 def test_copy_inplace_float8_e8m0fnu_to_float32():
     """Test copy_ from float8_e8m0fnu to float32."""
     device = flag_gems.device
