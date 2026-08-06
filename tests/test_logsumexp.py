@@ -37,7 +37,7 @@ def test_accuracy_logsumexp(shape, dtype, dim, keepdim):
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     ref_inp = to_reference(inp)
 
-    ref_out = torch.logsumexp(ref_inp, dim=dim, keepdim=keepdim)
+    ref_out = torch.logsumexp(ref_inp.float(), dim=dim, keepdim=keepdim).to(dtype)
     with flag_gems.use_gems():
         res_out = torch.logsumexp(inp, dim=dim, keepdim=keepdim)
 

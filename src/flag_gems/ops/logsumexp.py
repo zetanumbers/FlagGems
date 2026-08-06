@@ -56,8 +56,8 @@ def logsumexp_kernel_non_inner(
             tl.float32
         )
         m_new = tl.maximum(m, inp)
-        all_neg_inf = m_new == float("-inf")
-        z = tl.where(all_neg_inf, z, z * tl.exp(m - m_new) + tl.exp(inp - m_new))
+        m_new_safe = tl.where(m_new == float("-inf"), 0.0, m_new)
+        z = z * tl.exp(m - m_new_safe) + tl.exp(inp - m_new_safe)
         m = m_new
 
     m_reduced = tl.max(m, axis=0, keep_dims=True)
@@ -139,6 +139,12 @@ def logsumexp(inp, dim, keepdim=False):
     inp = inp.contiguous()
     K = inp.numel() // M // N
 
+    # Upcast half-precision to float32 to avoid tl.load precision issues
+    # on NPU when K is large
+    orig_dtype = inp.dtype
+    if orig_dtype in (torch.float16, torch.bfloat16):
+        inp = inp.to(torch.float32)
+
     # Output shape with reduction dimension set to 1
     shape = list(inp.shape)
     shape[dim] = 1
@@ -163,6 +169,8 @@ def logsumexp(inp, dim, keepdim=False):
                 N,
             )
 
+    if orig_dtype in (torch.float16, torch.bfloat16):
+        out = out.to(orig_dtype)
     if not keepdim:
         out = out.squeeze(dim=dim)
     return out
