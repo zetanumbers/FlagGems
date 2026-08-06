@@ -46,20 +46,27 @@ def _fused_q_kv_rmsnorm_kernel(
         row_in = q_ptr + token_idx * q_in_stride
         row_out = q_out_ptr + token_idx * q_out_stride
         weight_ptr = q_weight_ptr
+        offs = tl.arange(0, BLOCK_SIZE)
+        mask = offs < size
+        x = tl.load(row_in + offs, mask=mask, other=0.0).to(tl.float32)
+        var = tl.sum(x * x, axis=0) / size
+        rrms = tl.rsqrt(var + eps)
+        w = tl.load(weight_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+        y = x * rrms * w
+        tl.store(row_out + offs, y.to(row_out.dtype.element_ty), mask=mask)
     else:
         size = KV_SIZE
         row_in = kv_ptr + token_idx * kv_in_stride
         row_out = kv_out_ptr + token_idx * kv_out_stride
         weight_ptr = kv_weight_ptr
-
-    offs = tl.arange(0, BLOCK_SIZE)
-    mask = offs < size
-    x = tl.load(row_in + offs, mask=mask, other=0.0).to(tl.float32)
-    var = tl.sum(x * x, axis=0) / size
-    rrms = tl.rsqrt(var + eps)
-    w = tl.load(weight_ptr + offs, mask=mask, other=0.0).to(tl.float32)
-    y = x * rrms * w
-    tl.store(row_out + offs, y.to(row_out.dtype.element_ty), mask=mask)
+        offs = tl.arange(0, BLOCK_SIZE)
+        mask = offs < size
+        x = tl.load(row_in + offs, mask=mask, other=0.0).to(tl.float32)
+        var = tl.sum(x * x, axis=0) / size
+        rrms = tl.rsqrt(var + eps)
+        w = tl.load(weight_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+        y = x * rrms * w
+        tl.store(row_out + offs, y.to(row_out.dtype.element_ty), mask=mask)
 
 
 def fused_q_kv_rmsnorm(
