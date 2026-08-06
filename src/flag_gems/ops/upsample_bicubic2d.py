@@ -205,7 +205,7 @@ def upsample_bicubic2d(
         raise ValueError("Output size must be positive")
 
     device = input.device
-    if not input.is_cuda:
+    if device.type != "cuda" and device.type != "npu":
         raise ValueError("This Triton kernel requires CUDA tensors")
 
     if align_corners:
