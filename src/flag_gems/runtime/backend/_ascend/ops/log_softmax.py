@@ -53,6 +53,7 @@ def log_softmax_kernel_non_inner(
         )
         m = tl.max(inp, 0)
         z = tl.sum(tl.exp(inp - m[None, :]), 0)
+        # z = tl.sum(tl.where(mask, tl.exp(inp - m[None, :]), 0.0), 0)
         out = inp - m[None, :] - tl.log(z)[None, :]
         tl.store(output_ptr + offsets, out, mask=mask)
     else:
@@ -78,6 +79,7 @@ def log_softmax_kernel_non_inner(
                 tl.float32
             )
             z += tl.sum(tl.exp(inp - m[None, :]), 0)
+            # z += tl.sum(tl.where(mask, tl.exp(inp - m[None, :]), 0.0), 0)
 
         log_z = tl.log(z)
 
@@ -129,6 +131,7 @@ def log_softmax_kernel(
         input_ptrs = input_ptr + offset
         inp = tl.load(input_ptrs, mask=mask, other=-float("inf")).to(tl.float32)
         z += tl.sum(tl.exp(inp - m[:, None]), 1)
+        # z += tl.sum(tl.where(mask, tl.exp(inp - m[:, None]), 0.0), 1)
 
     log_z = tl.log(z)
 
@@ -166,7 +169,7 @@ def log_softmax_backward_kernel(
         offsets = m_offset[:, None] * N * K + n_offset[None, :] * K + pid_k
         mask = (m_offset[:, None] < M) & (n_offset[None, :] < N)
         out_grad_ptrs = out_grad_ptr + offsets
-        out_grad = tl.load(out_grad_ptrs, mask=mask).to(tl.float32)
+        out_grad = tl.load(out_grad_ptrs, mask=mask, other=0.0).to(tl.float32)
         scale += out_grad
     scale = tl.sum(scale, 1)
 
@@ -175,9 +178,9 @@ def log_softmax_backward_kernel(
         offsets = m_offset[:, None] * N * K + n_offset[None, :] * K + pid_k
         mask = (m_offset[:, None] < M) & (n_offset[None, :] < N)
         out_ptrs = out_ptr + offsets
-        out = tl.load(out_ptrs, mask=mask).to(tl.float32)
+        out = tl.load(out_ptrs, mask=mask, other=0.0).to(tl.float32)
         out_grad_ptrs = out_grad_ptr + offsets
-        out_grad = tl.load(out_grad_ptrs, mask=mask).to(tl.float32)
+        out_grad = tl.load(out_grad_ptrs, mask=mask, other=0.0).to(tl.float32)
         in_grad = out_grad - tl.exp(out) * scale[:, None]
         in_grad_ptrs = in_grad_ptr + offsets
         tl.store(in_grad_ptrs, in_grad, mask=mask)
