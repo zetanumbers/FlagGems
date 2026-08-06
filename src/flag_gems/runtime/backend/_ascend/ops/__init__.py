@@ -15,6 +15,7 @@
 from .addmm import addmm
 from .all import all, all_dim, all_dims
 from .amax import amax
+from .amin import amin, amin_
 from .angle import angle
 from .any import any, any_dim, any_dims
 from .arange import arange, arange_start
