@@ -150,36 +150,115 @@ def _reference_fn(q_fp8, kv_fp8, weights, context_lens, block_table):
     )
 
 
+def _native_paged_mqa_logits_ref(q_fp8, kv_fp8, weights, context_lens, block_table):
+    """Native PyTorch reference for fp8_fp4_paged_mqa_logits.
+
+    Computes: logits[row, pos] = sum_h(ReLU(sum_d(q[row,h,d] * k[pos,d]) * k_scale[pos])
+                                        * weights[row, h])
+
+    Uses paged KV cache with block_table mapping logical blocks to physical blocks.
+    """
+    q_values = q_fp8  # [B, next_n, H, D] float8_e4m3fn
+    B, next_n, H, D = q_values.shape
+    total_rows = B * next_n
+    block_size = kv_fp8.shape[1]  # BLOCK_KV
+    head_dim_with_scale = kv_fp8.shape[3]  # D + 4
+    head_dim = head_dim_with_scale - 4
+    assert head_dim == D
+
+    q_f = q_values.reshape(total_rows, H, D).to(torch.float32)  # [total_rows, H, D]
+    w_f = weights.to(torch.float32)  # [total_rows, H]
+
+    logits = torch.zeros(
+        (total_rows, MAX_MODEL_LEN), device=q_values.device, dtype=torch.float32
+    )
+
+    ctx_flat = context_lens.reshape(-1)[:total_rows]
+
+    for row in range(total_rows):
+        ctx_len = int(ctx_flat[row].item())
+        if ctx_len == 0:
+            continue
+        num_blocks = _ceil_div(ctx_len, block_size)
+        batch_idx = row // next_n
+
+        # Gather KV pages for this row
+        # Layout per block: [block_size * D bytes data | block_size * 4 bytes scales]
+        k_chunks = []
+        scale_chunks = []
+        for blk in range(num_blocks):
+            phys = int(block_table[batch_idx, blk].item())
+            kv_block_flat = kv_fp8[phys].reshape(-1)  # [block_size * (D+4)] uint8
+            kv_data = kv_block_flat[: block_size * D].reshape(block_size, D).view(
+                torch.float8_e4m3fn
+            )
+            kv_scale = kv_block_flat[block_size * D :].reshape(block_size, 4).view(
+                torch.float32
+            ).squeeze(-1)
+            k_chunks.append(kv_data.to(torch.float32))
+            scale_chunks.append(kv_scale)
+
+        k_all = torch.cat(k_chunks, dim=0)[:ctx_len]  # [ctx_len, D]
+        scale_all = torch.cat(scale_chunks, dim=0)[:ctx_len]  # [ctx_len]
+
+        # dot: [H, D] @ [ctx_len, D]^T -> [H, ctx_len]
+        dots = torch.matmul(q_f[row], k_all.T)  # [H, ctx_len]
+
+        # Apply scale, relu, weight, reduce over heads
+        scores = torch.relu(dots * scale_all[None, :])  # [H, ctx_len]
+        weighted = scores * w_f[row, :, None]  # [H, ctx_len]
+        logits[row, :ctx_len] = weighted.sum(dim=0)  # [ctx_len]
+
+    return logits
+
+
 @pytest.mark.fp8_fp4_paged_mqa_logits
 @pytest.mark.parametrize(
     "batch_size, next_n, avg_kv",
     TEST_SHAPES,
     ids=[f"B{b}_N{n}_L{l}" for b, n, l in TEST_SHAPES],
 )
-@pytest.mark.skipif(not _HAS_VLLM, reason="vLLM not available")
 def test_fp8_fp4_paged_mqa_logits(batch_size, next_n, avg_kv):
     torch.manual_seed(0)
     q_fp8, kv_fp8, weights, context_lens, block_table = _make_inputs(
         batch_size, next_n, avg_kv
     )
+    if _HAS_VLLM:
+        # Run Triton kernel
+        num_sms = torch.cuda.get_device_properties(0).multi_processor_count
+        schedule_meta = _vllm_get_metadata(context_lens, BLOCK_KV, num_sms)
+        q_input = (q_fp8, None)
+        triton_out = fp8_fp4_paged_mqa_logits(
+            q=q_input,
+            kv_cache=kv_fp8,
+            weights=weights,
+            context_lens=context_lens,
+            block_tables=block_table,
+            schedule_metadata=schedule_meta,
+            max_model_len=MAX_MODEL_LEN,
+            clean_logits=False,
+        )
 
-    # Run Triton kernel
-    num_sms = torch.cuda.get_device_properties(0).multi_processor_count
-    schedule_meta = _vllm_get_metadata(context_lens, BLOCK_KV, num_sms)
-    q_input = (q_fp8, None)
-    triton_out = fp8_fp4_paged_mqa_logits(
-        q=q_input,
-        kv_cache=kv_fp8,
-        weights=weights,
-        context_lens=context_lens,
-        block_tables=block_table,
-        schedule_metadata=schedule_meta,
-        max_model_len=MAX_MODEL_LEN,
-        clean_logits=False,
-    )
+        # Run reference (vLLM DeepGEMM CUDA)
+        ref_out = _reference_fn(q_fp8, kv_fp8, weights, context_lens, block_table)
+    else:
+        # Run native reference
+        ref_out = _native_paged_mqa_logits_ref(
+            q_fp8, kv_fp8, weights, context_lens, block_table
+        )
 
-    # Run reference (vLLM DeepGEMM CUDA)
-    ref_out = _reference_fn(q_fp8, kv_fp8, weights, context_lens, block_table)
+        # Run Triton kernel
+        q_input = (q_fp8, None)
+        triton_out = fp8_fp4_paged_mqa_logits(
+            q=q_input,
+            kv_cache=kv_fp8,
+            weights=weights,
+            context_lens=context_lens,
+            block_tables=block_table,
+            schedule_metadata=None,
+            max_model_len=MAX_MODEL_LEN,
+            clean_logits=False,
+        )
 
     # Compare valid positions only (up to each row's context length)
     total_rows = batch_size * next_n
