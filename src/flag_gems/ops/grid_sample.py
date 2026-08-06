@@ -3793,10 +3793,6 @@ def grid_sample_3d_trilinear_reflection_tiled_kernel(
 
 
 @libentry()
-@triton.autotune(
-    configs=runtime.get_tuned_config("grid_sample_2d_nearest_tiled"),
-    key=["N", "C", "H_out", "W_out"],
-)
 @triton.jit
 def grid_sample_2d_nearest_zeros_tiled_kernel(
     ptr_output,
@@ -3938,10 +3934,6 @@ def grid_sample_2d_nearest_zeros_tiled_kernel(
 
 
 @libentry()
-@triton.autotune(
-    configs=runtime.get_tuned_config("grid_sample_2d_bilinear_tiled"),
-    key=["N", "C", "H_out", "W_out"],
-)
 @triton.jit
 def grid_sample_2d_bilinear_zeros_tiled_kernel(
     ptr_output,
@@ -4104,10 +4096,6 @@ def grid_sample_2d_bilinear_zeros_tiled_kernel(
 
 
 @libentry()
-@triton.autotune(
-    configs=runtime.get_tuned_config("grid_sample_2d_nearest_tiled"),
-    key=["N", "C", "H_out", "W_out"],
-)
 @triton.jit
 def grid_sample_2d_nearest_border_tiled_kernel(
     ptr_output,
@@ -4225,10 +4213,6 @@ def grid_sample_2d_nearest_border_tiled_kernel(
 
 
 @libentry()
-@triton.autotune(
-    configs=runtime.get_tuned_config("grid_sample_2d_bilinear_tiled"),
-    key=["N", "C", "H_out", "W_out"],
-)
 @triton.jit
 def grid_sample_2d_bilinear_border_tiled_kernel(
     ptr_output,
@@ -4352,10 +4336,6 @@ def grid_sample_2d_bilinear_border_tiled_kernel(
 
 
 @libentry()
-@triton.autotune(
-    configs=runtime.get_tuned_config("grid_sample_2d_nearest_tiled"),
-    key=["N", "C", "H_out", "W_out"],
-)
 @triton.jit
 def grid_sample_2d_nearest_reflection_tiled_kernel(
     ptr_output,
@@ -4483,10 +4463,6 @@ def grid_sample_2d_nearest_reflection_tiled_kernel(
 
 
 @libentry()
-@triton.autotune(
-    configs=runtime.get_tuned_config("grid_sample_2d_bilinear_tiled"),
-    key=["N", "C", "H_out", "W_out"],
-)
 @triton.jit
 def grid_sample_2d_bilinear_reflection_tiled_kernel(
     ptr_output,
@@ -4817,11 +4793,11 @@ def grid_sample(
 
             # Calculate tile dimensions
             target_tile_pixels = output_pixels // target_blocks_per_nc
-            target_tile_side = int(max(4, min(128, int(target_tile_pixels**0.5))))
+            target_tile_side = int(max(4, min(64, int(target_tile_pixels**0.5))))
 
             # Snap to power-of-2 for better alignment
-            if target_tile_side >= 64:
-                block_h = block_w = 64 if target_tile_side < 96 else 128
+            if target_tile_side >= 32:
+                block_h = block_w = 64
             elif target_tile_side >= 16:
                 block_h = block_w = 32
             elif target_tile_side >= 8:
@@ -4842,18 +4818,34 @@ def grid_sample(
             # Original kernels use 1D grid (for bicubic or small outputs)
             grid_size = (N * C * H_out * W_out,)
 
-        kernel[grid_size](
-            output,
-            input,
-            grid,
-            N,
-            C,
-            H_in,
-            W_in,
-            H_out,
-            W_out,
-            align_corners,
-        )
+        if use_tiled and mode in ["nearest", "bilinear"]:
+            kernel[grid_size](
+                output,
+                input,
+                grid,
+                N,
+                C,
+                H_in,
+                W_in,
+                H_out,
+                W_out,
+                align_corners,
+                block_h,
+                block_w,
+            )
+        else:
+            kernel[grid_size](
+                output,
+                input,
+                grid,
+                N,
+                C,
+                H_in,
+                W_in,
+                H_out,
+                W_out,
+                align_corners,
+            )
 
         return output
 
