@@ -74,9 +74,12 @@ def test_special_log1p_nan_inf():
 @pytest.mark.special_log1p
 def test_special_log1p_small_values():
     """Test special_log1p precision for very small values."""
+    dtype = torch.float64
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     inp = torch.tensor(
         [1e-15, 1e-10, 1e-8, 1e-5, -1e-5, -1e-8],
-        dtype=torch.float64,
+        dtype=dtype,
         device=flag_gems.device,
     )
     ref_inp = utils.to_reference(inp.clone())
