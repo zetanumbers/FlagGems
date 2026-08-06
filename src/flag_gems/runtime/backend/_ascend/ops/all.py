@@ -66,10 +66,10 @@ def all_kernel_dim(
         for off in range(0, N, BLOCK_N):
             cols = off + tl.arange(0, BLOCK_N)[None, :]
             col_mask = cols < N
-            mask = row_mask and col_mask
+            mask = row_mask & col_mask
 
-            a = tl.load(ninp + cols, mask, other=1.0)
-            _all = _all and (a != 0)
+            a = tl.load(ninp + cols, mask, other=0.0)
+            _all = _all & ((a != 0) | (cols >= N))
         all = tl.reduce(_all, axis=1, combine_fn=reduce_all)
         tl.store(nout, all[:, None], row_mask)
 

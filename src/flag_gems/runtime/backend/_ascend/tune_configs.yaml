@@ -225,12 +225,6 @@ masked_fill:
 
 all:
 - META:
-    BLOCK_M: 1
-    BLOCK_N: 12288
-- META:
-    BLOCK_M: 2
-    BLOCK_N: 6144
-- META:
     BLOCK_M: 4
     BLOCK_N: 3072
 - META:
@@ -239,12 +233,6 @@ all:
 - META:
     BLOCK_M: 16
     BLOCK_N: 768
-- META:
-    BLOCK_M: 32
-    BLOCK_N: 384
-- META:
-    BLOCK_M: 64
-    BLOCK_N: 192
 
 amax:
 - gen: true
@@ -253,13 +241,9 @@ amax:
       BLOCK_M: block_m
       BLOCK_N: block_n
   block_m:
-  - 1
-  - 2
-  - 4
   - 8
   - 16
   - 32
-  - 64
   block_n:
   - 1024
   - 2048
@@ -933,3 +917,89 @@ fp8_paged_mqa_logits:
     BLOCK_H: 16
   num_warps: 4
   num_stages: 1
+fractional_max_pool2d_forward:
+- META:
+    BLOCK_H: 8
+    BLOCK_W: 8
+  num_warps: 2
+  num_stages: 2
+- META:
+    BLOCK_H: 16
+    BLOCK_W: 16
+  num_warps: 4
+  num_stages: 2
+- META:
+    BLOCK_H: 4
+    BLOCK_W: 4
+  num_warps: 1
+  num_stages: 1
+- META:
+    BLOCK_H: 8
+    BLOCK_W: 16
+  num_warps: 2
+  num_stages: 1
+
+fractional_max_pool2d_backward:
+- META:
+    BLOCK_H: 8
+    BLOCK_W: 8
+  num_warps: 2
+  num_stages: 2
+- META:
+    BLOCK_H: 16
+    BLOCK_W: 16
+  num_warps: 4
+  num_stages: 2
+- META:
+    BLOCK_H: 4
+    BLOCK_W: 4
+  num_warps: 1
+  num_stages: 1
+- META:
+    BLOCK_H: 8
+    BLOCK_W: 16
+  num_warps: 2
+  num_stages: 1
+conv3d_forward:
+  - META:
+      BLOCK_NI_DO_HO_WO: 512
+      BLOCK_CO: 16
+      BLOCK_CI: 16
+    num_warps: 4
+    num_stages: 2
+  - META:
+      BLOCK_NI_DO_HO_WO: 128
+      BLOCK_CO: 32
+      BLOCK_CI: 16
+    num_warps: 4
+    num_stages: 2
+  - META:
+      BLOCK_NI_DO_HO_WO: 128
+      BLOCK_CO: 16
+      BLOCK_CI: 16
+    num_warps: 2
+    num_stages: 4
+  - META:
+      BLOCK_NI_DO_HO_WO: 128
+      BLOCK_CO: 16
+      BLOCK_CI: 16
+    num_warps: 4
+    num_stages: 2
+  - META:
+      BLOCK_NI_DO_HO_WO: 256
+      BLOCK_CO: 16
+      BLOCK_CI: 16
+    num_warps: 4
+    num_stages: 2
+  - META:
+      BLOCK_NI_DO_HO_WO: 256
+      BLOCK_CO: 16
+      BLOCK_CI: 16
+    num_warps: 4
+    num_stages: 1
+  - META:
+      BLOCK_NI_DO_HO_WO: 128
+      BLOCK_CO: 32
+      BLOCK_CI: 32
+    num_warps: 4
+    num_stages: 3
