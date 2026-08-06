@@ -72,9 +72,9 @@ def grouped_topk_pytorch_ref(
     else:
         scores_processed = scores
 
-    # Group scores: sum of top-2 (scores+bias) per group, computed in input dtype
-    # then cast to input dtype (matching Triton store) and back to f32 for selection
-    scores_with_bias = (scores_processed + bias).float()
+    # Group scores: sum of top-2 (scores+bias) per group
+    # Compute addition in float32 to match Triton kernel's type promotion
+    scores_with_bias = scores_processed.float() + bias.float()
     scores_grouped = scores_with_bias.view(num_tokens, n_group, num_experts_per_group)
     top2_vals, _ = torch.topk(scores_grouped, k=2, dim=-1)
     group_scores = top2_vals.sum(dim=-1).to(scores.dtype).float()
