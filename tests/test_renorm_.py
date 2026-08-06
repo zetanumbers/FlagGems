@@ -38,7 +38,7 @@ RENORM_MAXNORM_LIST = [1.0] if QUICK_MODE else [0.5, 1.0, 2.0]
 @pytest.mark.parametrize("maxnorm", RENORM_MAXNORM_LIST)
 def test_renorm_(shape, dtype, dim, p, maxnorm):
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
-    ref_inp = utils.to_reference(inp)
+    ref_inp = utils.to_reference(inp.clone())
 
     ref_out = torch.ops.aten.renorm_(ref_inp, p, dim, maxnorm)
     with flag_gems.use_gems():
