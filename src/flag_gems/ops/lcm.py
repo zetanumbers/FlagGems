@@ -4,7 +4,7 @@ import logging
 import torch
 import triton
 import triton.language as tl
-import triton.language.extra.libdevice as libdevice
+import triton.language.extra.cann.libdevice as libdevice
 
 logger = logging.getLogger(__name__)
 
