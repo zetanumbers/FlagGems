@@ -22,11 +22,13 @@ from . import accuracy_utils as utils
 from . import conftest as cfg
 
 # =============================================================================
-# CUDA available check for FP8
+# CUDA and NPU available check for FP8
 # =============================================================================
 
 
-def _is_cuda_available():
+def _is_cuda_or_npu_available():
+    if flag_gems.device == "npu":
+        return torch.npu.is_available()
     if flag_gems.device != "cuda":
         return False
     if not torch.cuda.is_available():
@@ -36,7 +38,7 @@ def _is_cuda_available():
     return sm_version_num >= 90 and sm_version_num < 100
 
 
-CUDA_AVAILABLE = _is_cuda_available()
+CUDA_OR_NPU_AVAILABLE = _is_cuda_or_npu_available()
 
 
 def _ref_pack_seq(x, lengths, pad_value=-float("inf")):
@@ -210,8 +212,8 @@ def test_unpack_seq_3d_edge_cases(dtype):
 
 @pytest.mark.unpack_seq_triton
 @pytest.mark.skipif(
-    not CUDA_AVAILABLE,
-    reason="requires NVIDIA Hopper architecture for FP8",
+    not CUDA_OR_NPU_AVAILABLE,
+    reason="requires NVIDIA Hopper or NPU architecture for FP8",
 )
 def test_pack_unpack_fp8_roundtrip():
     FP8 = torch.float8_e4m3fn
