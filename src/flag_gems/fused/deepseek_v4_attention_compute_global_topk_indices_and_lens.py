@@ -97,7 +97,7 @@ def _compute_global_topk_indices_and_lens_kernel(
             mask=mask_2d,
             other=-1,
         )
-        valid = local_idx >= 0
+        valid = (local_idx >= 0) & mask_2d
 
         block_idx = local_idx // block_size
         block_off = local_idx - block_idx * block_size
