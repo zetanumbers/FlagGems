@@ -135,10 +135,13 @@ def _launch_upsample_nearest_exact3d_kernel(input, out, output_size=None, scale=
         raise ValueError(
             f"_upsample_nearest_exact3d expects a 5D tensor (N, C, D, H, W); got shape {tuple(input.shape)}"
         )
-    if not input.is_cuda or not out.is_cuda:
-        # Fallback to the native operator on CPU or non-CUDA devices
+    if input.device.type not in ("cuda", "npu") or out.device.type not in ("cuda", "npu"):
+        # Fallback to the native operator for non-target devices
+        scale_d = float(scale[0]) if scale and scale[0] is not None else None
+        scale_h = float(scale[1]) if scale and scale[1] is not None else None
+        scale_w = float(scale[2]) if scale and scale[2] is not None else None
         return torch.ops.aten._upsample_nearest_exact3d(
-            input, list(out.shape[-3:]), scale if scale else None
+            input, list(out.shape[-3:]), scale_d, scale_h, scale_w
         )
 
     N, C, ID, IH, IW = input.shape

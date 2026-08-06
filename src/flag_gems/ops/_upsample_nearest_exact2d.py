@@ -118,14 +118,16 @@ def _launch_upsample_nearest_exact2d_kernel(input, out, output_size=None, scale=
         raise ValueError(
             f"_upsample_nearest_exact2d expects a 4D tensor (N, C, H, W); got shape {tuple(input.shape)}"
         )
-    if not input.is_cuda or not out.is_cuda:
-        # Fallback to the native operator on CPU or non-CUDA devices
+    if input.device.type not in ("cuda", "npu") or out.device.type not in ("cuda", "npu"):
+        # Fallback to the native operator for non-target devices
+        scale_h = float(scale[0]) if scale and scale[0] is not None else None
+        scale_w = float(scale[1]) if scale and scale[1] is not None else None
         oh, ow = out.shape[-2:]
         return torch.ops.aten._upsample_nearest_exact2d(
             input,
             [oh, ow],
-            [scale[0]] if scale is not None else None,
-            [scale[1]] if scale is not None else None,
+            scale_h,
+            scale_w,
         )
 
     N, C, IH, IW = input.shape
