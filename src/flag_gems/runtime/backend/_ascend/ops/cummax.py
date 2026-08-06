@@ -125,11 +125,17 @@ def scan_part_max_kernel(
     result, cummax_indices = tl_cummax(inp_vals, in_indices_vals, axis=0)
 
     if tl.constexpr(NEED_PARTIAL):
-        part_max_via_max, part_max_indices_via_max = tl_max_tie_break_right(
-            inp_vals, in_indices_vals, axis=0
+        # Use the last element of associative_scan result as partial_max,
+        # because NPU tl.reduce does NOT propagate NaN but tl.associative_scan does.
+        part_max_via_max = tl.sum(
+            tl.where(tl.arange(0, BLOCK_SIZE) == BLOCK_SIZE - 1, result, 0.0), axis=0
         )
-        if tl.constexpr(not USE_OUT_INDICES):
-            part_max_indices_via_max = pid * BLOCK_SIZE + part_max_indices_via_max
+        part_max_indices_via_max = tl.sum(
+            tl.where(
+                tl.arange(0, BLOCK_SIZE) == BLOCK_SIZE - 1, cummax_indices, 0
+            ),
+            axis=0,
+        )
 
     out_ptrs = out + offset
     tl.store(out_ptrs, result, mask=mask)
@@ -239,11 +245,17 @@ def scan_part_max_abc_kernel(
     result, cummax_indices = tl_cummax(inp_vals, in_indices_vals, axis=0)
 
     if tl.constexpr(NEED_PARTIAL):
-        part_max_via_max, part_max_indices_via_max = tl_max_tie_break_right(
-            inp_vals, in_indices_vals, axis=0
+        # Use the last element of associative_scan result as partial_max,
+        # because NPU tl.reduce does NOT propagate NaN but tl.associative_scan does.
+        part_max_via_max = tl.sum(
+            tl.where(tl.arange(0, BLOCK_SIZE) == BLOCK_SIZE - 1, result, 0.0), axis=0
         )
-        if tl.constexpr(not USE_OUT_INDICES):
-            part_max_indices_via_max = pid_b * BLOCK_SIZE + part_max_indices_via_max
+        part_max_indices_via_max = tl.sum(
+            tl.where(
+                tl.arange(0, BLOCK_SIZE) == BLOCK_SIZE - 1, cummax_indices, 0
+            ),
+            axis=0,
+        )
 
     out_ptrs = out + offset
     tl.store(out_ptrs, result, mask=mask)

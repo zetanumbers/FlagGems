@@ -124,11 +124,17 @@ def scan_part_min_kernel(
     result, cummin_indices = tl_cummin(inp_vals, in_indices_vals, axis=0)
 
     if tl.constexpr(NEED_PARTIAL):
-        part_min_via_min, part_min_indices_via_min = tl_min_tie_break_right(
-            inp_vals, in_indices_vals, axis=0
+        # Use the last element of associative_scan result as partial_min,
+        # because NPU tl.reduce does NOT propagate NaN but tl.associative_scan does.
+        part_min_via_min = tl.sum(
+            tl.where(tl.arange(0, BLOCK_SIZE) == BLOCK_SIZE - 1, result, 0.0), axis=0
         )
-        if tl.constexpr(not USE_OUT_INDICES):
-            part_min_indices_via_min = pid * BLOCK_SIZE + part_min_indices_via_min
+        part_min_indices_via_min = tl.sum(
+            tl.where(
+                tl.arange(0, BLOCK_SIZE) == BLOCK_SIZE - 1, cummin_indices, 0
+            ),
+            axis=0,
+        )
 
     out_ptrs = out + offset
     tl.store(out_ptrs, result, mask=mask)
@@ -238,11 +244,17 @@ def scan_part_min_abc_kernel(
     result, cummin_indices = tl_cummin(inp_vals, in_indices_vals, axis=0)
 
     if tl.constexpr(NEED_PARTIAL):
-        part_min_via_min, part_min_indices_via_min = tl_min_tie_break_right(
-            inp_vals, in_indices_vals, axis=0
+        # Use the last element of associative_scan result as partial_min,
+        # because NPU tl.reduce does NOT propagate NaN but tl.associative_scan does.
+        part_min_via_min = tl.sum(
+            tl.where(tl.arange(0, BLOCK_SIZE) == BLOCK_SIZE - 1, result, 0.0), axis=0
         )
-        if tl.constexpr(not USE_OUT_INDICES):
-            part_min_indices_via_min = pid_b * BLOCK_SIZE + part_min_indices_via_min
+        part_min_indices_via_min = tl.sum(
+            tl.where(
+                tl.arange(0, BLOCK_SIZE) == BLOCK_SIZE - 1, cummin_indices, 0
+            ),
+            axis=0,
+        )
 
     out_ptrs = out + offset
     tl.store(out_ptrs, result, mask=mask)
