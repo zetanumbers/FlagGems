@@ -183,6 +183,7 @@ def _pdist_forward_general_kernel(
     N: tl.constexpr,
     M,
     p_val,
+    root_p,
     stride_x,
     BLOCK_M: tl.constexpr,
 ):
@@ -214,10 +215,11 @@ def _pdist_forward_general_kernel(
         )
 
         diff = tl.abs(xi - xj)
-        powered = tl.where(diff > 0.0, tl.exp(p_val * tl.log(diff)), 0.0)
+        safe_diff = tl.where(diff > 0.0, diff, 1.0)
+        powered = tl.where(diff > 0.0, tl.exp(p_val * tl.log(safe_diff)), 0.0)
         sum_pow += tl.sum(powered)
 
-    dist = tl.where(sum_pow > 0.0, tl.exp(tl.log(sum_pow) / p_val), 0.0)
+    dist = tl.where(sum_pow > 0.0, tl.exp(tl.log(sum_pow) / root_p), 0.0)
 
     tl.store(out_ptr + pid, dist)
 
@@ -281,12 +283,14 @@ def _pdist_forward(x, p=2.0):
                 BLOCK_M=BLOCK_M,
             )
         else:
+            root_p = 1.0 if p == 0.0 else p
             _pdist_forward_general_kernel[grid](
                 x,
                 out,
                 N,
                 M,
                 p,
+                root_p,
                 x.stride(0),
                 BLOCK_M=BLOCK_M,
             )
