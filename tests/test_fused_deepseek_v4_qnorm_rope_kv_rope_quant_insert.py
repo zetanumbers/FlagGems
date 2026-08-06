@@ -273,7 +273,7 @@ def fused_impl(q, kv, k_cache, slot_mapping, positions, cos_sin_cache, eps, bs):
 @pytest.mark.parametrize("n_heads", [8, 64])
 def test_q_path_matches_reference(num_tokens: int, n_heads: int):
     torch.manual_seed(0)
-    device = "cuda"
+    device = flag_gems.device
     dtype = torch.bfloat16
     eps = 1e-6
     max_pos = max(4096, num_tokens)
@@ -333,7 +333,7 @@ def _ue8m0_per_block_scales(kv_roped_nope_f32: torch.Tensor, qblock: int):
 @pytest.mark.parametrize("block_size", [16, 64])
 def test_kv_path_matches_reference(num_tokens: int, block_size: int):
     torch.manual_seed(1)
-    device = "cuda"
+    device = flag_gems.device
     dtype = torch.bfloat16
     eps = 1e-6
     max_pos = max(4096, num_tokens)
@@ -384,7 +384,7 @@ def test_kv_path_with_dp_padding(num_tokens: int, pad: int, block_size: int):
     """slot_mapping.size(0) < q.size(0): the kernel must skip padded
     tokens in the KV branch while still running Q-norm+RoPE on all rows."""
     torch.manual_seed(3)
-    device = "cuda"
+    device = flag_gems.device
     dtype = torch.bfloat16
     eps = 1e-6
     max_pos = max(4096, num_tokens)
@@ -441,7 +441,7 @@ def test_combined_q_and_kv(num_tokens: int, n_heads: int, block_size: int):
         return
 
     torch.manual_seed(2)
-    device = "cuda"
+    device = flag_gems.device
     dtype = torch.bfloat16
     eps = 1e-6
     max_pos = max(4096, num_tokens)
