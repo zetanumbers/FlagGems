@@ -112,5 +112,6 @@ def pixel_shuffle(input, upscale_factor):
             C_out,
             H_out,
             W_out,
+            bisheng_options='-mllvm --cce-enable-dynamic-misched=true',
         )
     return output
