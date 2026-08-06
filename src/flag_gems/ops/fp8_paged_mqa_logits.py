@@ -217,8 +217,6 @@ def fp8_paged_mqa_logits(
     max_model_len: int,
 ) -> torch.Tensor:
     logger.debug("GEMS FP8_PAGED_MQA_LOGITS")
-    assert q.is_cuda and kv_cache.is_cuda and weights.is_cuda
-    assert context_lens.is_cuda and block_tables.is_cuda
 
     batch_size, next_n, heads, dim = q.size()
     num_blocks, block_size, one, dim_plus_4 = kv_cache.size()

@@ -918,3 +918,18 @@ fp8_mqa_logits:
     BLOCK_D: 128
   num_warps: 4
   num_stages: 1
+fp8_paged_mqa_logits:
+- META:
+    BLOCK_KV: 64
+    BLOCK_D: 128
+    NUM_D_TILES: 1
+    BLOCK_H: 32
+  num_warps: 4
+  num_stages: 1
+- META:
+    BLOCK_KV: 64
+    BLOCK_D: 128
+    NUM_D_TILES: 1
+    BLOCK_H: 16
+  num_warps: 4
+  num_stages: 1
