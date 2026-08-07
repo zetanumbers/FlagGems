@@ -18,6 +18,8 @@ import numpy as np
 import pytest
 import torch
 
+import flag_gems
+
 # Import your operator
 from flag_gems.fused.DSA.bin_topk import (
     bucket_sort_topk,  # Replace with actual module name
@@ -68,14 +70,10 @@ def init_seed(seed):
     np.random.seed(seed)
 
 
-def to_reference(tensor, requires_grad=False):
-    result = tensor.detach().clone()
-    if requires_grad:
-        result.requires_grad_()
-    return result
+from ..accuracy_utils import to_reference
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = flag_gems.device
 
 
 # """Create input data for topk operator"""
@@ -149,7 +147,6 @@ def debug_topk_results(actual, expected, inputs, test_name=""):
         print(f"  Expected top values: {np.sort(expected_values)[-m:][::-1]}")
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA device required")
 @pytest.mark.skipif(not HAS_TLE, reason="TLE bucket_sort_topk is unavailable")
 @pytest.mark.bucket_sort_topk
 @pytest.mark.parametrize(
@@ -180,8 +177,8 @@ def test_bucket_sort_topk(starts_list, ends_list):
     assert_set_similar(actual_indices, ref_indices, dtype)
 
 
-@pytest.mark.skip(
-    "#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
+@pytest.mark.skipif(flag_gems.vendor_name != "ascend",
+    reason="#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
 )
 @pytest.mark.bucket_sort_topk
 @pytest.mark.parametrize("batch_size", [1, 4, 16])
@@ -215,8 +212,8 @@ def test_bucket_sort_topk_forward(
     assert_set_similar(your_indices, ref_indices, dtype)
 
 
-@pytest.mark.skip(
-    "#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
+@pytest.mark.skipif(flag_gems.vendor_name != "ascend",
+    reason="#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
 )
 @pytest.mark.bucket_sort_topk
 @pytest.mark.parametrize(
@@ -250,8 +247,8 @@ def test_bucket_sort_topk_edge_cases(config):
     assert_set_similar(your_indices, ref_indices, dtype)
 
 
-@pytest.mark.skip(
-    "#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
+@pytest.mark.skipif(flag_gems.vendor_name != "ascend",
+    reason="#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
 )
 @pytest.mark.bucket_sort_topk
 @pytest.mark.parametrize(
@@ -288,8 +285,8 @@ def test_bucket_sort_topk_large_scale(config):
     assert_set_similar(your_indices, ref_indices, dtype)
 
 
-@pytest.mark.skip(
-    "#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
+@pytest.mark.skipif(flag_gems.vendor_name != "ascend",
+    reason="#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
 )
 @pytest.mark.bucket_sort_topk
 def test_bucket_sort_topk_variable_length():
@@ -319,8 +316,8 @@ def test_bucket_sort_topk_variable_length():
     assert_set_similar(your_indices, ref_indices, dtype)
 
 
-@pytest.mark.skip(
-    "#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
+@pytest.mark.skipif(flag_gems.vendor_name != "ascend",
+    reason="#2352: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
 )
 @pytest.mark.bucket_sort_topk
 def test_bucket_sort_topk_correctness():
