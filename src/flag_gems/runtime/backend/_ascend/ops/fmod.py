@@ -31,14 +31,24 @@ def fmod_func(x, y):
     quotient = x_fp32 / y_fp32
     quotient = tl.where(quotient >= 0, tl.floor(quotient), tl.ceil(quotient))
     result = x_fp32 - y_fp32 * quotient
-    # Two-pass correction for NPU approximate division
+    # Correction for NPU approximate division
     abs_y = tl.abs(y_fp32)
+    # Boundary correction: if |result| >= |y|, quotient was off by 1
     result = tl.where(result >= abs_y, result - abs_y, result)
     result = tl.where(result <= -abs_y, result + abs_y, result)
-    # Second pass for edge cases where first pass misses
-    q2 = result / y_fp32
-    q2 = tl.where(q2 >= 0, tl.floor(q2), tl.ceil(q2))
-    result = result - y_fp32 * q2
+    # Veltkamp zero correction: when result == 0 but x != 0, use Veltkamp
+    # split of y to detect if quotient was off by 1 (true remainder ≈ ±|y|)
+    split_const = 4097.0
+    y_tmp = y_fp32 * split_const
+    y_hi = y_tmp - (y_tmp - y_fp32)
+    y_lo = y_fp32 - y_hi
+    r_split = x_fp32 - y_hi * quotient - y_lo * quotient
+    need_fix = (result == 0.0) & (x_fp32 != 0.0) & (r_split * x_fp32 < 0)
+    result = tl.where(need_fix & (x_fp32 > 0), abs_y, result)
+    result = tl.where(need_fix & (x_fp32 < 0), -abs_y, result)
+    # Sign correction: fmod result must have same sign as x (or be 0)
+    result = tl.where((x_fp32 > 0) & (result < 0), result + abs_y, result)
+    result = tl.where((x_fp32 < 0) & (result > 0), result - abs_y, result)
     return result.to(dtype)
 
 
@@ -56,8 +66,17 @@ def fmod_func_tensor_scalar(x, y):
     # Boundary correction: if |result| >= |y|, quotient was off by 1
     result = tl.where(result >= abs_y, result - abs_y, result)
     result = tl.where(result <= -abs_y, result + abs_y, result)
+    # Veltkamp zero correction: when result == 0 but x != 0, use Veltkamp
+    # split of y to detect if quotient was off by 1 (true remainder ≈ ±|y|)
+    split_const = 4097.0
+    y_tmp = y_fp32 * split_const
+    y_hi = y_tmp - (y_tmp - y_fp32)
+    y_lo = y_fp32 - y_hi
+    r_split = x_fp32 - y_hi * quotient - y_lo * quotient
+    need_fix = (result == 0.0) & (x_fp32 != 0.0) & (r_split * x_fp32 < 0)
+    result = tl.where(need_fix & (x_fp32 > 0), abs_y, result)
+    result = tl.where(need_fix & (x_fp32 < 0), -abs_y, result)
     # Sign correction: fmod result must have same sign as x (or be 0)
-    # If result has opposite sign, quotient was off by 1 in the other direction
     result = tl.where((x_fp32 > 0) & (result < 0), result + abs_y, result)
     result = tl.where((x_fp32 < 0) & (result > 0), result - abs_y, result)
     return result.to(dtype)
