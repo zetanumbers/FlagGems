@@ -24,14 +24,14 @@ from flag_gems.runtime import device, torch_device_fn
 
 logger = logging.getLogger(__name__)
 
+MAX_GRID_SIZES = 65535
 
 # Simple backward kernel - each thread handles one output position
 @triton.jit
 def _upsample_nearest_exact2d_backward_kernel(
     grad_output_ptr,
     grad_input_ptr,
-    N,
-    C,
+    NC,
     OH,
     OW,
     IH,
@@ -42,8 +42,8 @@ def _upsample_nearest_exact2d_backward_kernel(
 ):
     # Get program IDs
     pid = tl.program_id(0)
-    nc_pid = tl.program_id(1)
-
+    nc_start = tl.program_id(1)
+    num_nc = tl.num_programs(1)
     # Each thread handles one output position
     # Total output positions = OH * OW
     idx = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
@@ -63,15 +63,16 @@ def _upsample_nearest_exact2d_backward_kernel(
     ih = tl.minimum(ih, IH - 1)
     iw = tl.minimum(iw, IW - 1)
 
-    # Compute offsets
-    # For output: (nc, oh, ow) -> linear
-    # For input: (nc, ih, iw) -> linear
-    offset_o = (nc_pid * OH + oh) * OW + ow
-    offset_i = (nc_pid * IH + ih) * IW + iw
+    for nc_pid in range(nc_start, NC, num_nc):
+        # Compute offsets
+        # For output: (nc, oh, ow) -> linear
+        # For input: (nc, ih, iw) -> linear
+        offset_o = (nc_pid * OH + oh) * OW + ow
+        offset_i = (nc_pid * IH + ih) * IW + iw
 
-    # Load gradient and accumulate
-    grad = tl.load(grad_output_ptr + offset_o, mask=mask)
-    tl.atomic_add(grad_input_ptr + offset_i, grad, mask=mask)
+        # Load gradient and accumulate
+        grad = tl.load(grad_output_ptr + offset_o, mask=mask)
+        tl.atomic_add(grad_input_ptr + offset_i, grad, mask=mask)
 
 
 def _upsample_nearest_exact2d_backward(
@@ -115,15 +116,17 @@ def _upsample_nearest_exact2d_backward(
 
     # Grid: each (n,c) pair is a separate block in Y dimension
     # Each thread in X dimension handles one output position
+    NC = N * C
     BLOCK = 128
-    grid = (triton.cdiv(OH * OW, BLOCK), N * C)
+    grid_x = triton.cdiv(OH * OW, BLOCK)
+    grid_y = min(NC, max(1, MAX_GRID_SIZES //grid_x))
+    grid = (grid_x, grid_y)
 
     with torch_device_fn.device(grad_output.device):
         _upsample_nearest_exact2d_backward_kernel[grid](
             grad_output,
             grad_input,
-            N,
-            C,
+            NC,
             OH,
             OW,
             IH,
