@@ -45,6 +45,7 @@ from .embedding import embedding
 from .exponential_ import exponential_
 from .fill import fill_scalar, fill_scalar_, fill_tensor, fill_tensor_
 from .flip import flip
+from .fmod import fmod_scalar, fmod_scalar_, fmod_tensor, fmod_tensor_
 from .full import full
 from .full_like import full_like
 from .gather import gather, gather_backward
@@ -141,6 +142,10 @@ __all__ = [
     "flash_attention_forward",
     "flash_attn_varlen_func",
     "flip",
+    "fmod_scalar",
+    "fmod_scalar_",
+    "fmod_tensor",
+    "fmod_tensor_",
     "full",
     "full_like",
     "gather",
