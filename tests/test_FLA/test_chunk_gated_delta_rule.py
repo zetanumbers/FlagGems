@@ -28,14 +28,14 @@ chunk_gated_delta_rule_module = importlib.import_module(
 _TRITON_ALLOCATOR_READY = False
 
 
-def _cuda_available() -> bool:
-    return torch.cuda.is_available() and flag_gems.device == "cuda"
+def _device_available() -> bool:
+    return (torch.cuda.is_available() and flag_gems.device == "cuda") or flag_gems.vendor_name == "ascend"
 
 
 pytestmark = [
     pytest.mark.chunk_gated_delta_rule,
     pytest.mark.skipif(
-        not _cuda_available(), reason="chunk gated delta rule tests require CUDA"
+        not _device_available(), reason="chunk gated delta rule tests require CUDA or NPU"
     ),
 ]
 
@@ -45,7 +45,7 @@ def _install_triton_allocator():
     global _TRITON_ALLOCATOR_READY
     if (
         _TRITON_ALLOCATOR_READY
-        or not _cuda_available()
+        or not _device_available()
         or not hasattr(triton, "set_allocator")
     ):
         return

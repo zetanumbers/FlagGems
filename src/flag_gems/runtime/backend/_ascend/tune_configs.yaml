@@ -21,11 +21,8 @@ attention:
       PRE_LOAD_V: pre_load_v
   block_m:
   - 64
-  - 128
   block_n:
-  - 32
   - 64
-  - 128
   pre_load_v:
   - true
   - false
