@@ -135,28 +135,28 @@ def _upsample_bicubic2d_row_kernel(
     off_x_p1 = x_p1 * strideW
     off_x_p2 = x_p2 * strideW
 
-    v0 = tl.load(row_m1_ptr + off_x_m1).to(tl.float32)
-    v1 = tl.load(row_m1_ptr + off_x_0).to(tl.float32)
-    v2 = tl.load(row_m1_ptr + off_x_p1).to(tl.float32)
-    v3 = tl.load(row_m1_ptr + off_x_p2).to(tl.float32)
+    v0 = tl.load(row_m1_ptr + off_x_m1, mask=mask).to(tl.float32)
+    v1 = tl.load(row_m1_ptr + off_x_0, mask=mask).to(tl.float32)
+    v2 = tl.load(row_m1_ptr + off_x_p1, mask=mask).to(tl.float32)
+    v3 = tl.load(row_m1_ptr + off_x_p2, mask=mask).to(tl.float32)
     acc = (v0 * wx0 + v1 * wx1 + v2 * wx2 + v3 * wx3) * wy0
 
-    v0 = tl.load(row_0_ptr + off_x_m1).to(tl.float32)
-    v1 = tl.load(row_0_ptr + off_x_0).to(tl.float32)
-    v2 = tl.load(row_0_ptr + off_x_p1).to(tl.float32)
-    v3 = tl.load(row_0_ptr + off_x_p2).to(tl.float32)
+    v0 = tl.load(row_0_ptr + off_x_m1, mask=mask).to(tl.float32)
+    v1 = tl.load(row_0_ptr + off_x_0, mask=mask).to(tl.float32)
+    v2 = tl.load(row_0_ptr + off_x_p1, mask=mask).to(tl.float32)
+    v3 = tl.load(row_0_ptr + off_x_p2, mask=mask).to(tl.float32)
     acc += (v0 * wx0 + v1 * wx1 + v2 * wx2 + v3 * wx3) * wy1
 
-    v0 = tl.load(row_p1_ptr + off_x_m1).to(tl.float32)
-    v1 = tl.load(row_p1_ptr + off_x_0).to(tl.float32)
-    v2 = tl.load(row_p1_ptr + off_x_p1).to(tl.float32)
-    v3 = tl.load(row_p1_ptr + off_x_p2).to(tl.float32)
+    v0 = tl.load(row_p1_ptr + off_x_m1, mask=mask).to(tl.float32)
+    v1 = tl.load(row_p1_ptr + off_x_0, mask=mask).to(tl.float32)
+    v2 = tl.load(row_p1_ptr + off_x_p1, mask=mask).to(tl.float32)
+    v3 = tl.load(row_p1_ptr + off_x_p2, mask=mask).to(tl.float32)
     acc += (v0 * wx0 + v1 * wx1 + v2 * wx2 + v3 * wx3) * wy2
 
-    v0 = tl.load(row_p2_ptr + off_x_m1).to(tl.float32)
-    v1 = tl.load(row_p2_ptr + off_x_0).to(tl.float32)
-    v2 = tl.load(row_p2_ptr + off_x_p1).to(tl.float32)
-    v3 = tl.load(row_p2_ptr + off_x_p2).to(tl.float32)
+    v0 = tl.load(row_p2_ptr + off_x_m1, mask=mask).to(tl.float32)
+    v1 = tl.load(row_p2_ptr + off_x_0, mask=mask).to(tl.float32)
+    v2 = tl.load(row_p2_ptr + off_x_p1, mask=mask).to(tl.float32)
+    v3 = tl.load(row_p2_ptr + off_x_p2, mask=mask).to(tl.float32)
     acc += (v0 * wx0 + v1 * wx1 + v2 * wx2 + v3 * wx3) * wy3
 
     out_offset = (
@@ -206,7 +206,7 @@ def upsample_bicubic2d(
 
     device = input.device
     if device.type != "cuda" and device.type != "npu":
-        raise ValueError("This Triton kernel requires CUDA tensors")
+        raise ValueError("This Triton kernel requires CUDA and NPU tensors")
 
     if align_corners:
         scale_h = 0.0 if H_out <= 1 else (H_in - 1.0) / (H_out - 1.0)
