@@ -100,32 +100,83 @@ def make_input(
 def torch_flash_fwd(
     q, k, v, scale, is_causal, dropout_p=0, return_debug_mask=False, **extra_kwargs
 ):
+    """Native PyTorch reference for flash attention forward.
+
+    Replaces ``torch.ops.aten._flash_attention_forward`` (registered by
+    vllm_flash_attn / flash_attn) so the reference path does not depend on
+    those packages and can run on devices where they are unavailable, such as
+    Ascend NPU.
+
+    q, k, v: (batch, num_head, seq_len, head_size)
+    Returns (out, lse, seed, offset, debug_softmax) for signature
+    compatibility; seed/offset/debug_softmax are None because this reference
+    path does not exercise dropout.
+    """
+    # flash_attn layout: (batch, seq_len, num_head, head_size)
     q = q.transpose(1, 2)
     k = k.transpose(1, 2)
     v = v.transpose(1, 2)
 
-    (
-        out,
-        lse,
-        seed,
-        offset,
-        debug_softmax,
-    ) = torch.ops.aten._flash_attention_forward(
-        q,
-        k,
-        v,
-        None,
-        None,
-        q.shape[-3],
-        k.shape[-3],
-        dropout_p,
-        is_causal,
-        return_debug_mask,
-        scale=scale,
-        **extra_kwargs,
-    )
+    window_size_left = extra_kwargs.get("window_size_left", -1)
+    window_size_right = extra_kwargs.get("window_size_right", -1)
+    softcap = extra_kwargs.get("softcap", 0.0)
+    alibi_slopes = extra_kwargs.get("alibi_slopes", None)
 
-    return out, lse, seed, offset, debug_softmax
+    batch, seqlen_q, nheads, head_dim = q.shape
+    _, seqlen_k, nheads_k, _ = k.shape
+
+    # GQA: expand k/v heads to match q
+    g = nheads // nheads_k
+    if g > 1:
+        k = k.repeat_interleave(g, dim=2)
+        v = v.repeat_interleave(g, dim=2)
+
+    # Scores in fp32: (batch, nheads, seqlen_q, seqlen_k)
+    qf = q.transpose(1, 2).float() * scale
+    kf = k.transpose(1, 2).float()
+    vf = v.transpose(1, 2)
+    scores = torch.einsum("bhtd,bhsd->bhts", qf, kf)
+
+    if softcap > 0:
+        scores = (scores / softcap).tanh() * softcap
+
+    # Build attention mask (bottom-right aligned, matching flash_attn)
+    mask = torch.zeros(seqlen_q, seqlen_k, device=q.device, dtype=torch.bool)
+    if is_causal:
+        mask = mask | torch.triu(
+            torch.ones(seqlen_q, seqlen_k, device=q.device, dtype=torch.bool),
+            diagonal=seqlen_k - seqlen_q + 1,
+        )
+    if window_size_left >= 0 or window_size_right >= 0:
+        row_idx = torch.arange(seqlen_q, device=q.device, dtype=torch.long)[:, None]
+        col_idx = torch.arange(seqlen_k, device=q.device, dtype=torch.long)
+        if window_size_left >= 0:
+            left = row_idx + seqlen_k - seqlen_q - window_size_left
+            mask = mask | (col_idx < left)
+        if window_size_right >= 0:
+            right = row_idx + seqlen_k - seqlen_q + window_size_right
+            mask = mask | (col_idx > right)
+    scores = scores.masked_fill(mask, float("-inf"))
+
+    if alibi_slopes is not None:
+        attn_bias = attn_bias_from_alibi_slopes(
+            alibi_slopes, seqlen_q, seqlen_k, causal=is_causal
+        )
+        scores = scores + attn_bias
+
+    # lse in natural log, matching the gems flash_fwd_kernel convention.
+    # All-masked rows get +inf (matching the kernel).
+    all_masked = mask.all(dim=-1)  # (seqlen_q,)
+    lse = torch.logsumexp(scores, dim=-1)  # (batch, nheads, seqlen_q)
+    lse = lse.masked_fill(all_masked, float("inf"))
+
+    attention = torch.softmax(scores, dim=-1)
+    # Zero out all-masked rows to avoid NaN contamination
+    attention = attention.masked_fill(all_masked[None, None, :, None], 0.0)
+    attention = attention.to(vf.dtype)
+    out = torch.einsum("bhts,bhsd->bhtd", attention, vf)
+    out = out.transpose(1, 2)  # (batch, seqlen_q, nheads, head_dim)
+    return out, lse, None, None, None
 
 
 def gems_flash_fwd(
