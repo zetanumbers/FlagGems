@@ -43,9 +43,9 @@ def test_margin_ranking_loss(shape, dtype, margin, reduction):
         torch.randint(0, 2, shape, device=flag_gems.device, dtype=torch.int8) * 2 - 1
     ).to(dtype)
 
-    ref_input1 = utils.to_reference(input1)
-    ref_input2 = utils.to_reference(input2)
-    ref_target = utils.to_reference(target)
+    ref_input1 = utils.to_reference(input1, upcast=True)
+    ref_input2 = utils.to_reference(input2, upcast=True)
+    ref_target = utils.to_reference(target, upcast=True)
     ref_out = torch.ops.aten.margin_ranking_loss(
         ref_input1, ref_input2, ref_target, margin, reduction
     )
