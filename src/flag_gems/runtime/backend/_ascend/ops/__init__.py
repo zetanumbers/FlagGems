@@ -21,6 +21,7 @@ from .any import any, any_dim, any_dims
 from .arange import arange, arange_start
 from .argmax import argmax
 from .argmin import argmin
+from .fractional_max_pool2d import fractional_max_pool2d_backward
 from .attention import (
     ScaleDotProductAttention,
     flash_attention_forward,
