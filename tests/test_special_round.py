@@ -10,6 +10,8 @@ from . import accuracy_utils as utils
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
 def test_special_round(shape, dtype):
+    if flag_gems.vendor_name == "ascend":
+        pytest.skip("Currently, Ascend does not support float64.")
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     ref_inp = utils.to_reference(inp)
 
@@ -24,6 +26,8 @@ def test_special_round(shape, dtype):
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
 def test_special_round_out(shape, dtype):
+    if flag_gems.vendor_name == "ascend":
+        pytest.skip("Currently, Ascend does not support float64.")
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     out = torch.empty_like(inp)
     ref_inp = utils.to_reference(inp)
@@ -41,6 +45,8 @@ def test_special_round_out(shape, dtype):
 @pytest.mark.special_round
 def test_special_round_midpoints():
     # Test values: inputs and expected outputs for round-half-to-even
+    if flag_gems.vendor_name == "ascend":
+        pytest.skip("Currently, Ascend does not support float64.")
     test_cases = [
         (0.0, 0.0),
         (-0.0, 0.0),
@@ -84,6 +90,8 @@ def test_special_round_midpoints():
 @pytest.mark.special_round
 @pytest.mark.parametrize("decimals", [0, 1, 2, 3, -1, -2])
 def test_special_round_decimals(decimals):
+    if flag_gems.vendor_name == "ascend":
+        pytest.skip("Currently, Ascend does not support float64.")
     inp = torch.tensor(
         [1.2345, 2.5678, -3.4567, 4.0, 0.0, -0.0, 0.5, -0.5],
         dtype=torch.float32,
@@ -101,6 +109,8 @@ def test_special_round_decimals(decimals):
 @pytest.mark.special_round_out
 @pytest.mark.parametrize("decimals", [0, 1, 2, 3, -1, -2])
 def test_special_round_out_decimals(decimals):
+    if flag_gems.vendor_name == "ascend":
+        pytest.skip("Currently, Ascend does not support float64.")
     inp = torch.tensor(
         [1.2345, 2.5678, -3.4567, 4.0, 0.0, -0.0, 0.5, -0.5],
         dtype=torch.float32,
