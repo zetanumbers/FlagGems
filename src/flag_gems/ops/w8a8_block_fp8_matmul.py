@@ -28,7 +28,25 @@ logger = logging.getLogger(__name__)
 
 
 def _get_default_w8a8_block_fp8_config(block_n: int, block_k: int) -> Dict[str, Any]:
-    if flag_gems.device != "cuda":
+    if flag_gems.device == "cuda":
+        return {
+            "BLOCK_SIZE_M": 64,
+            "BLOCK_SIZE_N": block_n,
+            "BLOCK_SIZE_K": block_k,
+            "GROUP_SIZE_M": 32,
+            "num_warps": 4,
+            "num_stages": 2,
+        }
+    elif flag_gems.device == "npu":
+        return {
+            "BLOCK_SIZE_M": 32,
+            "BLOCK_SIZE_N": 32,
+            "BLOCK_SIZE_K": 64,
+            "GROUP_SIZE_M": 4,
+            "num_warps": 4,
+            "num_stages": 1,
+        }
+    else:
         return {
             "BLOCK_SIZE_M": 64,
             "BLOCK_SIZE_N": 64,
