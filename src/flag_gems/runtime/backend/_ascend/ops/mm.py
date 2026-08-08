@@ -205,7 +205,7 @@ def router_gemm(x, weight):
     b = weight.t().contiguous()
     dot_out_dtype = tl.float32
     grid = lambda META: (
-        triton.cdiv(M, META("BLOCK_M")) * triton.cdiv(N, META["BLOCK_N"]),
+        triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
         META.get("SPLIT_K", 1),
     )
     with torch_device_fn.device(x.device):
