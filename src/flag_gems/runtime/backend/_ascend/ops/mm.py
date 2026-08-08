@@ -23,6 +23,8 @@ from flag_gems.runtime import torch_device_fn
 from flag_gems.runtime.backend._ascend import heuristics_config_utils as _hcu
 from flag_gems.utils import libentry, libtuner
 
+from src.flag_gems.ops.scaled_mm import GROUP_M
+
 logger = logging.getLogger(__name__)
 
 
@@ -192,3 +194,34 @@ def mm_out(a, b, *, out):
             GROUP_M=8,
         )
     return out
+
+def router_gemm(x, weight):
+    logger.debug("GEMS_ASCEND ROUTER_GEMM")
+    if x.stride(0) > 1 and x.stride(1) > 1:
+        x = x.contiguous()
+    M, K = x.shape
+    N = weight.shape[0]
+    c = torch.empty((M, N), device=x.device, dtype=torch.float32)
+    b = weight.t().contiguous()
+    dot_out_dtype = tl.float32
+    grid = lambda META: (
+        triton.cdiv(M, META("BLOCK_M")) * triton.cdiv(N, META["BLOCK_N"]),
+        META.get("SPLIT_K", 1),
+    )
+    with torch_device_fn.device(x.device):
+        mm_kernel[grid](
+            x,
+            b,
+            c,
+            M,
+            N,
+            K,
+            x.stride(0),
+            x.stride(1),
+            b.stride(0),
+            b.stride(1),
+            c.stride(0),
+            c.stride(1),
+            dot_out_dtype=dot_out_dtype,
+            GROUP_M=8,
+        )

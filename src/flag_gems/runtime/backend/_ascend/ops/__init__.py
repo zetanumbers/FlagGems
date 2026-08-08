@@ -67,7 +67,7 @@ from .matmul_int8 import matmul_int8
 from .max import max, max_dim
 from .mean import mean, mean_dim
 from .min import min, min_dim
-from .mm import mm, mm_out
+from .mm import mm, mm_out, router_gemm
 from .multinomial import multinomial
 from .ones import ones
 from .ones_like import ones_like
