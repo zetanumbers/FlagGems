@@ -56,15 +56,6 @@ def _get_default_w8a8_block_fp8_config(block_n: int, block_k: int) -> Dict[str, 
             "num_stages": 3,
         }
 
-    return {
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": block_n,
-        "BLOCK_SIZE_K": block_k,
-        "GROUP_SIZE_M": 32,
-        "num_warps": 4,
-        "num_stages": 2,
-    }
-
 
 @triton.jit
 def w8a8_block_fp8_matmul_kernel(
