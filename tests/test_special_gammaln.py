@@ -5,22 +5,11 @@ import flag_gems
 
 from . import accuracy_utils as utils
 
-
-def _avoid_gammaln_poles(inp, threshold=0.05):
-    # Push input values that fall too close to a pole out to a safe distance.
-    nearest_pole = torch.round(inp)
-    mask = (nearest_pole <= 0 ) & ((inp - nearest_pole).abs() < threshold)
-    sign = torch.sign(inp - nearest_pole)
-    sign = torch.where(sign == 0, torch.ones_like(sign), sign)
-    return torch.where(mask, nearest_pole + sign * threshold, inp)
-
-
 @pytest.mark.special_gammaln
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
 def test_special_gammaln(shape, dtype):
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
-    inp = _avoid_gammaln_poles(inp)
     ref_inp = utils.to_reference(inp)
 
     ref_out = torch.special.gammaln(ref_inp)
@@ -35,7 +24,6 @@ def test_special_gammaln(shape, dtype):
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
 def test_special_gammaln_out(shape, dtype):
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
-    inp = _avoid_gammaln_poles(inp)
     ref_inp = utils.to_reference(inp)
     out = torch.empty_like(inp)
     ref_out = torch.empty_like(ref_inp)
