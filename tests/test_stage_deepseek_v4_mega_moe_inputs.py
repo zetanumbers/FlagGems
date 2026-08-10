@@ -22,10 +22,10 @@ from flag_gems.fused.stage_deepseek_v4_mega_moe_inputs import (
 
 
 def _supports_fp8e4nv():
-    if flag_gems.devie == "cuda":
+    if flag_gems.device == "cuda":
         major, _ = torch.cuda.get_device_capability()
         return major >= 9
-    elif flag_gems.devie == "npu":
+    elif flag_gems.device == "npu":
         return True
     else:
         return False
@@ -119,7 +119,7 @@ def test_stage_deepseek_v4_mega_moe_inputs_accuracy(num_tokens, hidden_size, top
         topk_idx_out,
         topk_weights_out,
     )
-    torch.cuda.synchronize() if flag_gems.devie == "cuda" else torch.npu.synchronize()
+    torch.cuda.synchronize() if flag_gems.device == "cuda" else torch.npu.synchronize()
 
     fg_testing.assert_equal(x_fp8.view(torch.uint8), ref_x.view(torch.uint8))
     fg_testing.assert_equal(x_sf, ref_x_sf)
@@ -133,7 +133,7 @@ def test_stage_deepseek_v4_mega_moe_inputs_accuracy(num_tokens, hidden_size, top
     not _supports_fp8e4nv(), reason="requires cuda with fp8e4nv support or npu with fp8e4nv support"
 )
 def test_stage_deepseek_v4_mega_moe_inputs_rejects_bad_hidden_size():
-    if flag_gems.devie == "cuda":
+    if flag_gems.device == "cuda":
         device = "cuda"
     else:
         device = "npu"
