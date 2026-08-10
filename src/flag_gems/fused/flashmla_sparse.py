@@ -22,17 +22,14 @@ import triton.language as tl
 from flag_gems.runtime import device as _runtime_device
 from flag_gems.utils.triton_version_utils import has_triton_tle
 
-# On Ascend NPU, the Unified Buffer (UB) is limited to 256 KB.
-# With BH=64, the kernel's local tensors (q_blk, kv_blk, acc, qk) total ~315 KB,
-# exceeding the UB. Use smaller BH to fit within the UB constraint.
+# On Ascend NPU, the Unified Buffer (UB) is limited to 216 KB (1769472 bits).
+# The .trans() on kv_blk doubles its UB footprint, so both BH and BK must be
+# kept small. With BH=16, BK=32: ~131 KB UB (fits 216 KB limit safely).
 _IS_ASCEND = _runtime_device.vendor_name == "ascend"
 
 if _IS_ASCEND:
-    # BH=32: ~192 KB UB usage (fits 256 KB limit)
-    # BH=16: ~132 KB UB usage (safe fallback)
     _SPARSE_FWD_CONFIGS = [
-        triton.Config({"BK": 64, "BH": 32}, num_warps=4, num_stages=1),
-        triton.Config({"BK": 64, "BH": 16}, num_warps=4, num_stages=1),
+        triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
     ]
 else:
     _SPARSE_FWD_CONFIGS = [

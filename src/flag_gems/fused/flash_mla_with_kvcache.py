@@ -29,26 +29,24 @@ import triton.language as tl
 from flag_gems.runtime import device as _runtime_device
 from flag_gems.utils.triton_version_utils import has_triton_tle
 
-# On Ascend NPU, the Unified Buffer (UB) is limited to 256 KB.
-# With BH=64, the kernel's local tensors (q_blk, kv_blk, acc, qk) exceed the UB.
-# Use smaller BH to fit within the UB constraint.
+# On Ascend NPU, the Unified Buffer (UB) is limited to 216 KB (1769472 bits).
+# The .trans() on kv_blk doubles its UB footprint, so both BH and BK must be
+# kept small. Configs below are sized to fit within 216 KB with overhead.
 _IS_ASCEND = _runtime_device.vendor_name == "ascend"
 
 if _IS_ASCEND:
-    # V32 sparse decode: BH=32 -> ~192 KB UB (fits 256 KB limit)
+    # V32 sparse decode: BH=16, BK=32 -> ~131 KB UB
     _SPARSE_DECODE_CONFIGS = [
-        triton.Config({"BK": 64, "BH": 32}, num_warps=4, num_stages=1),
-        triton.Config({"BK": 64, "BH": 16}, num_warps=4, num_stages=1),
-    ]
-    # MODEL1 sparse decode: BK already 32, BH=32 -> ~136 KB UB
-    _SPARSE_DECODE_MODEL1_CONFIGS = [
-        triton.Config({"BK": 32, "BH": 32}, num_warps=4, num_stages=1),
         triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
     ]
-    # Dense decode: BLOCK_H=32 -> ~180 KB UB (acc is [BH, 512] fp32)
+    # MODEL1 sparse decode: BK=32, BH=16 -> ~111 KB UB
+    _SPARSE_DECODE_MODEL1_CONFIGS = [
+        triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
+    ]
+    # Dense decode: BLOCK_H=16, BLOCK_N=32 -> ~140 KB UB
+    # (v_c is [BLOCK_N, 512] bf16, .trans() doubles it)
     _DENSE_DECODE_CONFIGS = [
-        triton.Config({"BLOCK_H": 32, "BLOCK_N": 64}, num_warps=4, num_stages=1),
-        triton.Config({"BLOCK_H": 16, "BLOCK_N": 64}, num_warps=4, num_stages=1),
+        triton.Config({"BLOCK_H": 16, "BLOCK_N": 32}, num_warps=4, num_stages=1),
     ]
 else:
     _SPARSE_DECODE_CONFIGS = [
