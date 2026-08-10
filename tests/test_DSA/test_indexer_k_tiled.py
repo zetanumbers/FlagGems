@@ -27,6 +27,8 @@ from .torch_src.fp8_lighting_indexer import (
 )
 from .utils import generate_random_cu_seqlens
 
+from .. import conftest as cfg
+
 
 # Accuracy check function
 def display_error_message(msg):
@@ -95,8 +97,8 @@ def assert_close_inf(
     a = a.masked_fill(~a_finite, 0)
     b = b.masked_fill(~b_finite, 0)
     correlation = compute_correlation(a, b, tensor_name)
-    difference = 1.0 - correlation
-    if not (0 <= difference <= tolerance):
+    difference = max(0.0, 1.0 - correlation)
+    if not (difference <= tolerance):
         display_error_message(f"{tensor_name} Error: {difference}")
         if should_raise:
             assert False
@@ -111,12 +113,14 @@ def init_seed(seed):
 
 def to_reference(tensor, requires_grad=False):
     result = tensor.detach().clone()
+    if cfg.TO_CPU:
+        result = result.to("cpu")
     if requires_grad:
         result.requires_grad_()
     return result
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device(cfg.device)
 
 
 def make_lighting_indexer_input(
@@ -142,7 +146,12 @@ def make_lighting_indexer_input(
     # p = (torch.randn(S, SKV, device="cuda", dtype=torch.float32) * 4).softmax(dim=-1)
 
     ks, ke = generate_random_cu_seqlens(
-        per_cp_seqlen=S, cp_size=3, cp_rank=4, kv_stride=kv_stride, average_q_len=2048
+        per_cp_seqlen=S,
+        cp_size=3,
+        cp_rank=4,
+        kv_stride=kv_stride,
+        average_q_len=2048,
+        device=device,
     )
 
     return q, kv, weights, ks, ke
@@ -163,9 +172,9 @@ def reference_lighting_indexer_implementation(q, kv, weights, ks, ke):
     )
 
 
-@pytest.mark.skip(
-    "#2353: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
-)
+# @pytest.mark.skip(
+#     "#2353: RuntimeError: Cannot call @triton.jit'd outside of the scope of a kernel"
+# )
 @pytest.mark.triton_lighting_indexer_k_tiled_interface
 @pytest.mark.parametrize("seq_len_q", [1024, 2048, 4096])
 @pytest.mark.parametrize("seq_len_kv", [2048, 4096, 8192])
@@ -184,13 +193,18 @@ def test_lighting_indexer_forward(
     ref_q = to_reference(q, False)
     ref_kv = to_reference(kv, False)
     ref_weights = to_reference(weights, False)
+    ref_ks = to_reference(ks, False)
+    ref_ke = to_reference(ke, False)
 
     ref_output, cost_ref = reference_lighting_indexer_implementation(
-        ref_q, ref_kv, ref_weights, ks, ke
+        ref_q, ref_kv, ref_weights, ref_ks, ref_ke
     )
 
     # Your operator implementation
     your_output = triton_lighting_indexer_k_tiled_interface(q, kv, weights, ks, ke)
+
+    # Move reference output to same device for comparison
+    ref_output = ref_output.to(your_output.device)
 
     # Accuracy comparison
     assert_close_inf(your_output, ref_output, 1e-2)

@@ -223,25 +223,25 @@ def per_custom_dims_cast_to_fp8(
 
 
 def generate_random_cu_seqlens(
-    per_cp_seqlen, cp_size=4, cp_rank=3, kv_stride=1, average_q_len=512
+    per_cp_seqlen, cp_size=4, cp_rank=3, kv_stride=1, average_q_len=512, device="cuda"
 ):
     total_seqlen = per_cp_seqlen * cp_size
 
     cu_seqlens = torch.randint(
         0, average_q_len * 2, (total_seqlen // average_q_len * 2,)
-    ).cuda()
+    ).to(device)
     last_seq_id = torch.where(cu_seqlens.cumsum(0) >= total_seqlen)[0][0]
     cu_seqlens = cu_seqlens[:last_seq_id]
 
     if cu_seqlens.sum() < total_seqlen:
         cu_seqlens = torch.cat(
-            [cu_seqlens, torch.tensor([total_seqlen - cu_seqlens.sum()]).cuda()]
+            [cu_seqlens, torch.tensor([total_seqlen - cu_seqlens.sum()]).to(device)]
         )
 
     cu_seqlens_cumsum = torch.cumsum(cu_seqlens, dim=0)
     cu_seqlens_k_cumsum = torch.cumsum(cu_seqlens // kv_stride, dim=0)
-    cu_seqlens_qs = torch.cat([torch.tensor([0]).cuda(), cu_seqlens_cumsum[:-1]])
-    cu_seqlens_ks = torch.cat([torch.tensor([0]).cuda(), cu_seqlens_k_cumsum[:-1]])
+    cu_seqlens_qs = torch.cat([torch.tensor([0]).to(device), cu_seqlens_cumsum[:-1]])
+    cu_seqlens_ks = torch.cat([torch.tensor([0]).to(device), cu_seqlens_k_cumsum[:-1]])
     cu_seqlens_qe = cu_seqlens_cumsum.clone()
     cu_seqlens_ke = cu_seqlens_k_cumsum.clone()
 

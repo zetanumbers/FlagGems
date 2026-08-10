@@ -28,11 +28,12 @@ def ref_fp8_mqa_logits(
     k = k.float()
 
     seq_len_kv = kv.shape[0]
+    device = kv.device
     mask_lo = (
-        torch.arange(0, seq_len_kv, device="cuda")[None, :] >= cu_seqlen_ks[:, None]
+        torch.arange(0, seq_len_kv, device=device)[None, :] >= cu_seqlen_ks[:, None]
     )
     mask_hi = (
-        torch.arange(0, seq_len_kv, device="cuda")[None, :] < cu_seqlen_ke[:, None]
+        torch.arange(0, seq_len_kv, device=device)[None, :] < cu_seqlen_ke[:, None]
     )
     mask = mask_lo & mask_hi
 
