@@ -281,12 +281,26 @@ def keep(cfg, must_keep=None):
 
 def prune_fwd_configs(configs, nargs, **kwargs):
     is_dropout = nargs["is_dropout"]
-    if is_dropout:
-        return list(
-            filter(lambda cfg: cfg.num_warps == 4 and cfg.num_stages < 4, configs)
+    seqlen_q = nargs["seqlen_q"]
+    seqlen_k = nargs["seqlen_k"]
+    window_size_left = nargs["window_size_left"]
+    window_size_right = nargs["window_size_right"]
+
+    pruned = []
+    for cfg in configs:
+        if is_dropout and not (cfg.num_warps == 4 and cfg.num_stages < 4):
+            continue
+        # Inject IS_EVEN_MN from config's BLOCK_M/BLOCK_N.
+        # On NPU (triton-ascend), @triton.heuristics runs before autotune
+        # config selection, so BLOCK_M/BLOCK_N are not available in heuristic
+        # args. Compute here where each config's kwargs are available.
+        bm = cfg.kwargs["BLOCK_M"]
+        bn = cfg.kwargs["BLOCK_N"]
+        cfg.kwargs["IS_EVEN_MN"] = is_even_mn(
+            seqlen_q, seqlen_k, bm, bn, window_size_left, window_size_right
         )
-    else:
-        return configs
+        pruned.append(cfg)
+    return pruned
 
 
 def flash_fwd_kernel_heur_block_k(args):
@@ -303,14 +317,6 @@ def flash_fwd_kernel_heur_block_k(args):
     values={
         "BLOCK_K": flash_fwd_kernel_heur_block_k,
         "PRE_LOAD_V": lambda args: False,
-        "IS_EVEN_MN": lambda args: is_even_mn(
-            args["seqlen_q"],
-            args["seqlen_k"],
-            args["BLOCK_M"],
-            args["BLOCK_N"],
-            args["window_size_left"],
-            args["window_size_right"],
-        ),
     }
 )
 @triton.jit(
