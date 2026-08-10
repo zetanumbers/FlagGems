@@ -19,7 +19,26 @@ import torch
 import triton
 import triton.language as tl
 
+from flag_gems.runtime import device as _runtime_device
 from flag_gems.utils.triton_version_utils import has_triton_tle
+
+# On Ascend NPU, the Unified Buffer (UB) is limited to 256 KB.
+# With BH=64, the kernel's local tensors (q_blk, kv_blk, acc, qk) total ~315 KB,
+# exceeding the UB. Use smaller BH to fit within the UB constraint.
+_IS_ASCEND = _runtime_device.vendor_name == "ascend"
+
+if _IS_ASCEND:
+    # BH=32: ~192 KB UB usage (fits 256 KB limit)
+    # BH=16: ~132 KB UB usage (safe fallback)
+    _SPARSE_FWD_CONFIGS = [
+        triton.Config({"BK": 64, "BH": 32}, num_warps=4, num_stages=1),
+        triton.Config({"BK": 64, "BH": 16}, num_warps=4, num_stages=1),
+    ]
+else:
+    _SPARSE_FWD_CONFIGS = [
+        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=2),
+        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=4),
+    ]
 
 if has_triton_tle(3, 6, 0):
     try:
@@ -41,10 +60,7 @@ TLE_FLASHMLA_PREFILL_WORKER_NUM_WARPS = 4
 
 
 @triton.autotune(
-    configs=[
-        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=2),
-        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=4),
-    ],
+    configs=_SPARSE_FWD_CONFIGS,
     key=["SQ", "HQ", "DQK", "SKV", "TOPK", "HAVE_ATTN_SINK", "HAVE_TOPK_LENGTH"],
 )
 @triton.jit

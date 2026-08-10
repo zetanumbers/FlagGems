@@ -14,7 +14,8 @@
 
 """
 Tests for flash_mla_with_kvcache Triton implementation.
-Uses the CUDA FlashMLA implementation from vLLM as ground truth.
+On CUDA, uses the vLLM FlashMLA implementation as ground truth.
+On NPU (or any device without vLLM), uses a native PyTorch reference.
 """
 
 import math
@@ -22,7 +23,9 @@ import math
 import pytest
 import torch
 
-# CUDA reference
+import flag_gems
+
+# CUDA reference (optional)
 try:
     from vllm.third_party.flashmla.flash_mla_interface import (
         flash_mla_with_kvcache as cuda_flash_mla,
@@ -46,7 +49,8 @@ from flag_gems.fused.flash_mla_with_kvcache import (
 
 from . import conftest as cfg
 
-DEVICE = "cuda"
+DEVICE = flag_gems.device
+ON_CUDA = "cuda" in str(DEVICE)
 CUDA_AVAILABLE = torch.cuda.is_available()
 
 # Shape configs for QUICK_MODE
@@ -57,6 +61,309 @@ else:
     V32_FP8_CONFIGS = [(2, 64, 64, 50), (2, 128, 128, 100)]
     EXTRA_KV_CONFIGS = [(64, 512, 12), (2, 512, 260)]
 FP8_MAX = 448.0
+
+
+# ============================================================================
+# Native PyTorch reference implementation (used when vLLM is unavailable, e.g. NPU)
+# ============================================================================
+
+
+def _native_get_mla_metadata():
+    return FlashMLASchedMeta(), None
+
+
+def _gather_dequant_v32(k_cache, indices, page_block_size):
+    """Gather and dequantize V32 FP8 KV cache (656 bytes per token).
+
+    Layout: [0:512] FP8 NoPE, [512:528] 4 FP32 scales, [528:656] 64 BF16 RoPE.
+    V = NoPE (512 dims), K = concat(NoPE, RoPE) (576 dims).
+    """
+    batch, seq_q, topk = indices.shape
+    num_pages = k_cache.shape[0]
+
+    flat_idx = indices.reshape(-1)
+    block_ids = flat_idx // page_block_size
+    rel_ids = flat_idx % page_block_size
+
+    gathered = k_cache[block_ids, rel_ids, 0, :]  # (B*S*T, 656)
+    gathered = gathered.reshape(batch, seq_q, topk, 656)
+
+    fp8_data = gathered[..., :512].view(torch.float8_e4m3fn).float()
+    scales = gathered[..., 512:528].view(torch.float32).reshape(
+        batch, seq_q, topk, 4
+    )
+    rope = gathered[..., 528:656].view(torch.bfloat16).reshape(
+        batch, seq_q, topk, 64
+    ).float()
+
+    fp8_groups = fp8_data.reshape(batch, seq_q, topk, 4, 128)
+    nope = (fp8_groups * scales[..., None]).reshape(batch, seq_q, topk, 512)
+
+    K = torch.cat([nope, rope], dim=-1)  # (B, S, T, 576)
+    V = nope  # (B, S, T, 512)
+    return K.to(torch.bfloat16), V.to(torch.bfloat16)
+
+
+def _gather_dequant_model1(k_cache, indices, page_block_size):
+    """Gather and dequantize MODEL1 FP8 KV cache (584 bytes per token, page-oriented).
+
+    Per page: [token_data (pbs*576), scales (pbs*8)].
+    Per token: 448 FP8 NoPE + 64 BF16 RoPE = 576 bytes, 8 bytes scales (7 used).
+    V = concat(NoPE, RoPE) (512 dims), K = same (512 dims).
+    """
+    batch, seq_q, topk = indices.shape
+    num_pages = k_cache.shape[0]
+
+    # MODEL1 is page-oriented: extract token data and scales separately
+    page_flat = k_cache.reshape(num_pages, -1)  # (num_pages, pbs * 584)
+    token_data = page_flat[:, : page_block_size * 576].reshape(
+        num_pages, page_block_size, 576
+    )
+    scale_data = page_flat[:, page_block_size * 576 :].reshape(
+        num_pages, page_block_size, 8
+    )
+
+    flat_idx = indices.reshape(-1)
+    block_ids = flat_idx // page_block_size
+    rel_ids = flat_idx % page_block_size
+
+    gathered_token = token_data[block_ids, rel_ids]  # (B*S*T, 576)
+    gathered_scale = scale_data[block_ids, rel_ids]  # (B*S*T, 8)
+
+    gathered_token = gathered_token.reshape(batch, seq_q, topk, 576)
+    gathered_scale = gathered_scale.reshape(batch, seq_q, topk, 8)
+
+    fp8_data = gathered_token[..., :448].view(torch.float8_e4m3fn).float()
+    rope = gathered_token[..., 448:576].view(torch.bfloat16).reshape(
+        batch, seq_q, topk, 64
+    ).float()
+
+    # E8M0 scales: scale = 2^(uint8 - 127)
+    scale_u8 = gathered_scale[..., :7]
+    scales = torch.pow(2.0, scale_u8.to(torch.float32) - 127.0)
+
+    fp8_groups = fp8_data.reshape(batch, seq_q, topk, 7, 64)
+    nope = (fp8_groups * scales[..., None]).reshape(batch, seq_q, topk, 448)
+
+    K = torch.cat([nope, rope], dim=-1)  # (B, S, T, 512)
+    V = K  # MODEL1: V includes both NoPE and RoPE
+    return K.to(torch.bfloat16), V.to(torch.bfloat16)
+
+
+def _native_sparse_decode(
+    q,
+    k_cache,
+    indices,
+    out,
+    lse,
+    scale,
+    attn_sink,
+    topk_length,
+    is_fp8_kvcache,
+    extra_k_cache,
+    extra_indices_in_kvcache,
+    extra_topk_length,
+):
+    """Native PyTorch sparse decode reference."""
+    batch, seq_q, h_q, d_qk = q.shape
+    topk = indices.shape[-1]
+    page_block_size = k_cache.shape[1]
+
+    # Gather and dequantize main KV
+    if d_qk == 576:
+        K, V = _gather_dequant_v32(k_cache, indices, page_block_size)
+        head_dim_v = 512
+    else:
+        K, V = _gather_dequant_model1(k_cache, indices, page_block_size)
+        head_dim_v = 512
+
+    # Gather extra KV if provided
+    if extra_k_cache is not None:
+        extra_topk = extra_indices_in_kvcache.shape[-1]
+        extra_pbs = extra_k_cache.shape[1]
+        K_extra, V_extra = _gather_dequant_model1(
+            extra_k_cache, extra_indices_in_kvcache, extra_pbs
+        )
+        K = torch.cat([K, K_extra], dim=2)
+        V = torch.cat([V, V_extra], dim=2)
+        total_topk = topk + extra_topk
+    else:
+        total_topk = topk
+
+    # Build mask for topk_length
+    if topk_length is not None or extra_topk_length is not None:
+        mask = torch.ones(batch, seq_q, total_topk, dtype=torch.bool, device=q.device)
+        arange = torch.arange(total_topk, device=q.device)
+        if topk_length is not None:
+            for b in range(batch):
+                tl = topk_length[b].item()
+                mask[b, :, tl:topk] = False
+        if extra_topk_length is not None:
+            for b in range(batch):
+                etl = extra_topk_length[b].item()
+                mask[b, :, topk + etl :] = False
+    else:
+        mask = None
+
+    _compute_attention(q, K, V, out, lse, scale, mask, attn_sink)
+
+
+def _native_dense_decode(
+    q,
+    k_cache,
+    block_table,
+    cache_seqlens,
+    out,
+    lse,
+    scale,
+    causal,
+    head_dim_v,
+):
+    """Native PyTorch dense decode reference with paged attention."""
+    batch, seq_q, h_q, d_qk = q.shape
+    page_block_size = k_cache.shape[1]
+    max_pages_per_seq = block_table.shape[1]
+
+    for b in range(batch):
+        seqlen = min(
+            cache_seqlens[b].item(), max_pages_per_seq * page_block_size
+        )
+        num_pages_needed = (seqlen + page_block_size - 1) // page_block_size
+        pages = block_table[b, :num_pages_needed]
+        gathered = k_cache[pages]  # (num_pages, pbs, h_k, d_qk)
+        K_b = gathered.reshape(-1, d_qk)[:seqlen]  # (seqlen, d_qk)
+        V_b = K_b[:, :head_dim_v]  # (seqlen, head_dim_v)
+
+        Q_b = q[b].float()  # (seq_q, h_q, d_qk)
+        K_flat = K_b.float()  # (seqlen, d_qk)
+        V_flat = V_b.float()  # (seqlen, head_dim_v)
+
+        # QK
+        qk = torch.einsum("shd,td->sht", Q_b, K_flat) * scale
+
+        # Causal mask
+        if causal and seq_q > 1:
+            causal_mask = torch.triu(
+                torch.ones(seq_q, seqlen, device=q.device), diagonal=1
+            ).bool()
+            qk = qk.masked_fill(causal_mask[:, None, :], float("-inf"))
+
+        # LSE and softmax
+        lse_val = torch.logsumexp(qk, dim=-1)  # (seq_q, h_q)
+        p = torch.exp(qk - lse_val[..., None])
+
+        # Output
+        out_b = torch.einsum("sht,td->shd", p, V_flat)
+
+        out[b] = out_b.to(out.dtype)
+        lse[b] = lse_val.T  # (h_q, seq_q)
+
+
+def _compute_attention(q, K, V, out, lse, scale, mask, attn_sink):
+    """Compute attention with optional mask and attn_sink.
+
+    Q: (batch, seq_q, h_q, d_qk)
+    K: (batch, seq_q, n_kv, d_qk)
+    V: (batch, seq_q, n_kv, head_dim_v)
+    """
+    batch, seq_q, h_q, d_qk = q.shape
+    n_kv = K.shape[2]
+    head_dim_v = V.shape[-1]
+
+    Q = q.reshape(batch * seq_q, h_q, d_qk).float()
+    K_flat = K.reshape(batch * seq_q, n_kv, d_qk).float()
+    V_flat = V.reshape(batch * seq_q, n_kv, head_dim_v).float()
+
+    qk = torch.matmul(Q, K_flat.transpose(-1, -2)) * scale  # (B*S, h_q, n_kv)
+
+    if mask is not None:
+        mask_flat = mask.reshape(batch * seq_q, n_kv)
+        qk = qk.masked_fill(~mask_flat[:, None, :], float("-inf"))
+
+    lse_val = torch.logsumexp(qk, dim=-1)  # (B*S, h_q)
+    p = torch.exp(qk - lse_val[..., None])
+    out_val = torch.matmul(p, V_flat)  # (B*S, h_q, head_dim_v)
+
+    if attn_sink is not None:
+        sink = attn_sink.float()  # (h_q,)
+        sink_weight = torch.exp(sink[None, :] - lse_val)  # (B*S, h_q)
+        out_val = out_val / (1 + sink_weight[..., None])
+        lse_val = torch.log(
+            torch.exp(lse_val) + torch.exp(sink[None, :])
+        )
+
+    out.copy_(out_val.reshape(batch, seq_q, h_q, head_dim_v).to(out.dtype))
+    lse.copy_(lse_val.reshape(batch, h_q, seq_q))
+
+
+def _native_flash_mla_with_kvcache(
+    q,
+    k_cache,
+    block_table,
+    cache_seqlens,
+    head_dim_v,
+    sched_meta,
+    num_splits=None,
+    softmax_scale=None,
+    causal=False,
+    is_fp8_kvcache=False,
+    indices=None,
+    attn_sink=None,
+    extra_k_cache=None,
+    extra_indices_in_kvcache=None,
+    topk_length=None,
+    extra_topk_length=None,
+    out=None,
+):
+    """Native PyTorch reference for flash_mla_with_kvcache."""
+    batch, seq_q, h_q, d_qk = q.shape
+
+    if softmax_scale is None:
+        softmax_scale = d_qk ** (-0.5)
+
+    if out is None:
+        out = torch.empty(
+            batch, seq_q, h_q, head_dim_v, dtype=q.dtype, device=q.device
+        )
+
+    lse = torch.empty(
+        batch, h_q, seq_q, dtype=torch.float32, device=q.device
+    )
+
+    if indices is not None:
+        _native_sparse_decode(
+            q,
+            k_cache,
+            indices,
+            out,
+            lse,
+            softmax_scale,
+            attn_sink,
+            topk_length,
+            is_fp8_kvcache,
+            extra_k_cache,
+            extra_indices_in_kvcache,
+            extra_topk_length,
+        )
+    else:
+        _native_dense_decode(
+            q,
+            k_cache,
+            block_table,
+            cache_seqlens,
+            out,
+            lse,
+            softmax_scale,
+            causal,
+            head_dim_v,
+        )
+
+    return out, lse
+
+
+# ============================================================================
+# KV cache generators
+# ============================================================================
 
 
 def generate_v32_fp8_kv_cache(
@@ -150,12 +457,17 @@ def generate_model1_fp8_kv_cache(
     return kv_cache
 
 
-def check_close(triton_out, cuda_out, name, cos_threshold=0.99):
-    diff = (triton_out.float() - cuda_out.float()).abs()
+# ============================================================================
+# Test helpers
+# ============================================================================
+
+
+def check_close(triton_out, ref_out, name, cos_threshold=0.99):
+    diff = (triton_out.float() - ref_out.float()).abs()
     max_diff = diff.max().item()
     mean_diff = diff.mean().item()
     cos_sim = torch.nn.functional.cosine_similarity(
-        triton_out.float().flatten(), cuda_out.float().flatten(), dim=0
+        triton_out.float().flatten(), ref_out.float().flatten(), dim=0
     ).item()
     print(
         f"  {name}: max_diff={max_diff:.6f}, "
@@ -164,11 +476,18 @@ def check_close(triton_out, cuda_out, name, cos_threshold=0.99):
     assert cos_sim > cos_threshold, f"{name} cosine similarity too low: {cos_sim}"
 
 
-def _run_cuda(q, k_cache, block_table, cache_seqlens, head_dim_v, **kwargs):
-    cuda_meta, _ = cuda_get_mla_metadata()
-    return cuda_flash_mla(
-        q, k_cache, block_table, cache_seqlens, head_dim_v, cuda_meta, **kwargs
-    )
+def _run_ref(q, k_cache, block_table, cache_seqlens, head_dim_v, **kwargs):
+    """Run reference implementation: vLLM CUDA if available, else native PyTorch."""
+    if VLLM_AVAILABLE:
+        ref_meta, _ = cuda_get_mla_metadata()
+        return cuda_flash_mla(
+            q, k_cache, block_table, cache_seqlens, head_dim_v, ref_meta, **kwargs
+        )
+    else:
+        ref_meta, _ = triton_get_mla_metadata()
+        return _native_flash_mla_with_kvcache(
+            q, k_cache, block_table, cache_seqlens, head_dim_v, ref_meta, **kwargs
+        )
 
 
 def _run_triton(q, k_cache, block_table, cache_seqlens, head_dim_v, **kwargs):
@@ -178,9 +497,10 @@ def _run_triton(q, k_cache, block_table, cache_seqlens, head_dim_v, **kwargs):
     )
 
 
+# On CUDA: require vLLM (original behavior). On NPU: run with native reference.
 pytestmark = pytest.mark.skipif(
-    not (VLLM_AVAILABLE and CUDA_AVAILABLE),
-    reason="vLLM FlashMLA and CUDA are required",
+    ON_CUDA and not (VLLM_AVAILABLE and CUDA_AVAILABLE),
+    reason="vLLM FlashMLA and CUDA are required on CUDA backend",
 )
 
 
@@ -204,11 +524,11 @@ def test_sparse_decode_v32_fp8(batch, h_q, topk, num_pages):
     )
     attn_sink = torch.randn(h_q, dtype=torch.float32, device=DEVICE)
 
-    cuda_out_buf = torch.empty(
+    ref_out_buf = torch.empty(
         batch, seq_q, h_q, head_dim_v, dtype=torch.bfloat16, device=DEVICE
     )
-    triton_out_buf = torch.empty_like(cuda_out_buf)
-    cuda_out, cuda_lse = _run_cuda(
+    triton_out_buf = torch.empty_like(ref_out_buf)
+    ref_out, ref_lse = _run_ref(
         q,
         kv_cache,
         None,
@@ -217,7 +537,7 @@ def test_sparse_decode_v32_fp8(batch, h_q, topk, num_pages):
         is_fp8_kvcache=True,
         indices=indices,
         attn_sink=attn_sink,
-        out=cuda_out_buf,
+        out=ref_out_buf,
     )
     triton_out, triton_lse = _run_triton(
         q,
@@ -231,10 +551,10 @@ def test_sparse_decode_v32_fp8(batch, h_q, topk, num_pages):
         out=triton_out_buf,
     )
 
-    assert cuda_out.data_ptr() == cuda_out_buf.data_ptr()
+    assert ref_out.data_ptr() == ref_out_buf.data_ptr()
     assert triton_out.data_ptr() == triton_out_buf.data_ptr()
-    check_close(triton_out, cuda_out, "out")
-    check_close(triton_lse, cuda_lse, "lse")
+    check_close(triton_out, ref_out, "out")
+    check_close(triton_lse, ref_lse, "lse")
 
 
 def test_sparse_decode_model1_topk_length_attn_sink_out():
@@ -254,12 +574,12 @@ def test_sparse_decode_model1_topk_length_attn_sink_out():
     )
     topk_length = torch.randint(1, topk + 1, (batch,), dtype=torch.int32, device=DEVICE)
     attn_sink = torch.randn(h_q, dtype=torch.float32, device=DEVICE)
-    cuda_out_buf = torch.empty(
+    ref_out_buf = torch.empty(
         batch, seq_q, h_q, head_dim_v, dtype=torch.bfloat16, device=DEVICE
     )
-    triton_out_buf = torch.empty_like(cuda_out_buf)
+    triton_out_buf = torch.empty_like(ref_out_buf)
 
-    cuda_out, cuda_lse = _run_cuda(
+    ref_out, ref_lse = _run_ref(
         q,
         kv_cache,
         None,
@@ -269,7 +589,7 @@ def test_sparse_decode_model1_topk_length_attn_sink_out():
         indices=indices,
         topk_length=topk_length,
         attn_sink=attn_sink,
-        out=cuda_out_buf,
+        out=ref_out_buf,
     )
     triton_out, triton_lse = _run_triton(
         q,
@@ -284,8 +604,8 @@ def test_sparse_decode_model1_topk_length_attn_sink_out():
         out=triton_out_buf,
     )
 
-    check_close(triton_out, cuda_out, "out", cos_threshold=0.98)
-    check_close(triton_lse, cuda_lse, "lse", cos_threshold=0.98)
+    check_close(triton_out, ref_out, "out", cos_threshold=0.98)
+    check_close(triton_lse, ref_lse, "lse", cos_threshold=0.98)
 
 
 @pytest.mark.parametrize(
@@ -327,7 +647,7 @@ def test_sparse_decode_model1_extra_kv(
     )
     attn_sink = torch.randn(h_q, dtype=torch.float32, device=DEVICE)
 
-    cuda_out, cuda_lse = _run_cuda(
+    ref_out, ref_lse = _run_ref(
         q,
         kv_cache,
         None,
@@ -356,8 +676,8 @@ def test_sparse_decode_model1_extra_kv(
         extra_topk_length=extra_topk_length,
     )
 
-    check_close(triton_out, cuda_out, "out", cos_threshold=0.98)
-    check_close(triton_lse, cuda_lse, "lse", cos_threshold=0.98)
+    check_close(triton_out, ref_out, "out", cos_threshold=0.98)
+    check_close(triton_lse, ref_lse, "lse", cos_threshold=0.98)
 
 
 def test_dense_decode_seq_q1():
@@ -386,15 +706,15 @@ def test_dense_decode_seq_q1():
     cache_seqlens[0] = seqlen // 2
     cache_seqlens[-1] = seqlen + page_block_size
 
-    cuda_out, cuda_lse = _run_cuda(
+    ref_out, ref_lse = _run_ref(
         q, kv_cache, block_table, cache_seqlens, head_dim_v, causal=True
     )
     triton_out, triton_lse = _run_triton(
         q, kv_cache, block_table, cache_seqlens, head_dim_v, causal=True
     )
 
-    check_close(triton_out, cuda_out, "out")
-    check_close(triton_lse, cuda_lse, "lse")
+    check_close(triton_out, ref_out, "out")
+    check_close(triton_lse, ref_lse, "lse")
 
 
 def test_error_v32_rejects_topk_length():

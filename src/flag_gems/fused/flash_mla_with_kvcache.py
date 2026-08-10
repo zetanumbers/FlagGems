@@ -26,7 +26,43 @@ import torch
 import triton
 import triton.language as tl
 
+from flag_gems.runtime import device as _runtime_device
 from flag_gems.utils.triton_version_utils import has_triton_tle
+
+# On Ascend NPU, the Unified Buffer (UB) is limited to 256 KB.
+# With BH=64, the kernel's local tensors (q_blk, kv_blk, acc, qk) exceed the UB.
+# Use smaller BH to fit within the UB constraint.
+_IS_ASCEND = _runtime_device.vendor_name == "ascend"
+
+if _IS_ASCEND:
+    # V32 sparse decode: BH=32 -> ~192 KB UB (fits 256 KB limit)
+    _SPARSE_DECODE_CONFIGS = [
+        triton.Config({"BK": 64, "BH": 32}, num_warps=4, num_stages=1),
+        triton.Config({"BK": 64, "BH": 16}, num_warps=4, num_stages=1),
+    ]
+    # MODEL1 sparse decode: BK already 32, BH=32 -> ~136 KB UB
+    _SPARSE_DECODE_MODEL1_CONFIGS = [
+        triton.Config({"BK": 32, "BH": 32}, num_warps=4, num_stages=1),
+        triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
+    ]
+    # Dense decode: BLOCK_H=32 -> ~180 KB UB (acc is [BH, 512] fp32)
+    _DENSE_DECODE_CONFIGS = [
+        triton.Config({"BLOCK_H": 32, "BLOCK_N": 64}, num_warps=4, num_stages=1),
+        triton.Config({"BLOCK_H": 16, "BLOCK_N": 64}, num_warps=4, num_stages=1),
+    ]
+else:
+    _SPARSE_DECODE_CONFIGS = [
+        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=2),
+        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=4),
+    ]
+    _SPARSE_DECODE_MODEL1_CONFIGS = [
+        triton.Config({"BK": 32, "BH": 64}, num_warps=4, num_stages=1),
+        triton.Config({"BK": 32, "BH": 64}, num_warps=8, num_stages=1),
+    ]
+    _DENSE_DECODE_CONFIGS = [
+        triton.Config({"BLOCK_H": 64, "BLOCK_N": 64}, num_warps=8, num_stages=2),
+        triton.Config({"BLOCK_H": 64, "BLOCK_N": 64}, num_warps=8, num_stages=3),
+    ]
 
 if has_triton_tle(3, 6, 0):
     try:
@@ -107,10 +143,7 @@ def get_mla_metadata(*args, **kwargs) -> Tuple[FlashMLASchedMeta, None]:
 
 
 @triton.autotune(
-    configs=[
-        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=2),
-        triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=4),
-    ],
+    configs=_SPARSE_DECODE_CONFIGS,
     key=["HQ", "DQK", "TOPK", "HAVE_ATTN_SINK", "HAVE_TOPK_LENGTH", "IS_FP8"],
 )
 @triton.jit
@@ -329,10 +362,7 @@ def _sparse_decode_kernel(
 
 
 @triton.autotune(
-    configs=[
-        triton.Config({"BK": 32, "BH": 64}, num_warps=4, num_stages=1),
-        triton.Config({"BK": 32, "BH": 64}, num_warps=8, num_stages=1),
-    ],
+    configs=_SPARSE_DECODE_MODEL1_CONFIGS,
     key=[
         "HQ",
         "TOPK",
@@ -692,10 +722,7 @@ def _sparse_decode_model1_kernel(
 
 
 @triton.autotune(
-    configs=[
-        triton.Config({"BLOCK_H": 64, "BLOCK_N": 64}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_H": 64, "BLOCK_N": 64}, num_warps=8, num_stages=3),
-    ],
+    configs=_DENSE_DECODE_CONFIGS,
     key=["HQ", "DQK", "HAVE_CAUSAL"],
 )
 @triton.jit
@@ -1145,9 +1172,7 @@ def _sparse_decode_dispatch(
     is_fp8_kvcache,
 ):
     """Launch sparse decode kernel."""
-    BH = 64
-    num_head_blocks = (num_heads_q + BH - 1) // BH
-    grid = (batch_size * seq_q * num_head_blocks,)
+    grid = lambda META: (batch_size * seq_q * triton.cdiv(num_heads_q, META["BH"]),)
 
     skv = kv.shape[0] * page_block_size
 
@@ -1322,9 +1347,6 @@ def _dense_decode_dispatch(
     causal,
 ):
     """Launch dense decode kernel."""
-    BLOCK_H = 64
-    num_head_blocks = (num_heads_q + BLOCK_H - 1) // BLOCK_H
-
     # KV cache: [num_blocks, page_block_size, num_heads_k, head_dim_k]
     # Flatten to [num_tokens_total, head_dim_k] for paged access
     kv_flat = kv_cache.view(-1, head_dim_k).contiguous()
@@ -1350,7 +1372,7 @@ def _dense_decode_dispatch(
         )
         return
 
-    grid = (num_head_blocks, batch_size * seq_q)
+    grid = lambda META: (triton.cdiv(num_heads_q, META["BLOCK_H"]), batch_size * seq_q)
 
     _dense_decode_kernel[grid](
         q,
