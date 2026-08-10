@@ -160,7 +160,7 @@ def _fht_fused_generic(
             row_off = row_id * DIM
 
             for s in tl.static_range(LOG_N):
-                stride_s: tl.constexpr = 1 << s
+                stride_s = 1 << s
                 is_upper = (offsets & stride_s) == 0
 
                 if s == 0:
