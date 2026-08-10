@@ -323,9 +323,31 @@ HEURISTICS_CONFIGS = {
         "BLOCK_SIZE": vdot_heur_block_size,
     },
     "mha_block_16": {
-        "BLOCK_M": lambda args: 16,  # 16
-        "BLOCK_N": lambda args: 16,  # 64
-        "num_warps": lambda args: 4,  # 4
-        "num_stages": lambda args: 3,  # 3
+        "BLOCK_M": lambda args: 16,
+        "BLOCK_N": lambda args: 16,
+        "num_warps": lambda args: 4,
+        "num_stages": lambda args: 3,
+    },
+    # Flash attention varlen configs sized for 216 KB UB limit.
+    # bK .trans() doubles K footprint; acc_ is [BLOCK_M, BLOCK_K] fp32.
+    # For head_size > 128 (BLOCK_K=256), BLOCK_M must be <= 64.
+    # args[33] is head_size (d) in fwd_params.__slots__.
+    "mha_block_128": {
+        "BLOCK_M": lambda args: 128 if args[33] <= 128 else 64,
+        "BLOCK_N": lambda args: 32 if args[33] <= 128 else 16,
+        "num_warps": lambda args: 4,
+        "num_stages": lambda args: 1,
+    },
+    "mha_block_64": {
+        "BLOCK_M": lambda args: 64,
+        "BLOCK_N": lambda args: 32,
+        "num_warps": lambda args: 4,
+        "num_stages": lambda args: 1,
+    },
+    "mha_block_32": {
+        "BLOCK_M": lambda args: 32,
+        "BLOCK_N": lambda args: 32,
+        "num_warps": lambda args: 4,
+        "num_stages": lambda args: 1,
     },
 }
