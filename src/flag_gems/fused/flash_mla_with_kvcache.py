@@ -30,21 +30,26 @@ from flag_gems.runtime import device as _runtime_device
 from flag_gems.utils.triton_version_utils import has_triton_tle
 
 # On Ascend NPU, the Unified Buffer (UB) is limited to 216 KB (1769472 bits).
-# The .trans() on kv_blk doubles its UB footprint, so both BH and BK must be
-# kept small. Configs below are sized to fit within 216 KB with overhead.
+# The kernel uses transposed acc layout ([BDP, BH] / [HEAD_DIM_V, BLOCK_H]) to
+# avoid kv_blk.trans() / v_c.trans() copies in P@V.  This eliminates ~32 KB of
+# duplicate UB per loop iteration.  Only a tiny exp_qk_t ([BK, BH]) or p_t
+# ([BLOCK_N, BLOCK_H]) trans is needed, which is negligible.
+# Dequant also uses single .to(float32) + single multiply (no branch duplication).
 _IS_ASCEND = _runtime_device.vendor_name == "ascend"
 
 if _IS_ASCEND:
-    # V32 sparse decode: BH=16, BK=32 -> ~131 KB UB
+    # V32 sparse decode: BH=16, BK=32.
+    # P@V peak UB (no kv.trans): q(18KB) + acc(33KB) + kv_blk(33KB) + exp_qk_t(1KB) ≈ 85 KB
     _SPARSE_DECODE_CONFIGS = [
         triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
     ]
-    # MODEL1 sparse decode: BK=32, BH=16 -> ~111 KB UB
+    # MODEL1 sparse decode: same sizing as V32
     _SPARSE_DECODE_MODEL1_CONFIGS = [
         triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
     ]
-    # Dense decode: BLOCK_H=16, BLOCK_N=32 -> ~140 KB UB
-    # (v_c is [BLOCK_N, 512] bf16, .trans() doubles it)
+    # Dense decode: BLOCK_H=16, BLOCK_N=32.
+    # v_c is [512, 32] bf16 (32KB). QK^T and P@V both use v_c directly (no trans).
+    # P@V peak UB: q(18KB) + acc(32KB) + v_c(32KB) + p_t(1KB) ≈ 83 KB
     _DENSE_DECODE_CONFIGS = [
         triton.Config({"BLOCK_H": 16, "BLOCK_N": 32}, num_warps=4, num_stages=1),
     ]
@@ -228,11 +233,14 @@ def _sparse_decode_kernel(
         tq_ptr = q_base + DP + offs_h[:, None] * stride_qh + offs_td[None, :]
         tq_blk = tl.load(tq_ptr, eviction_policy="evict_first")
 
-    # Online softmax accumulators
+    # Online softmax accumulators.
+    # Layout [BDP, BH] (transposed) avoids kv_blk.trans() copies in P@V:
+    #   P@V = dot(kv_blk[BDP, BK], exp_qk_t[BK, BH]) -> acc[BDP, BH]
+    # exp_qk_t is tiny ([BK, BH]) vs kv_blk.trans() ([BDP, BK]).
     max_log = tl.full([BH], float("-inf"), dtype=tl.float32)
     sum_exp = tl.full([BH], 0.0, dtype=tl.float32)
-    acc0 = tl.zeros([BH, BDP], dtype=tl.float32)
-    acc1 = tl.zeros([BH, BDP], dtype=tl.float32)
+    acc0 = tl.zeros([BDP, BH], dtype=tl.float32)
+    acc1 = tl.zeros([BDP, BH], dtype=tl.float32)
 
     topk_len = tl.load(topk_length_ptr) if HAVE_TOPK_LENGTH else TOPK
     NK = tl.cdiv(topk_len, BK)
@@ -259,22 +267,17 @@ def _sparse_decode_kernel(
             scale2 = tl.load(kv_scales + kv_ids * stride_scales_n + 2)  # [BK]
             scale3 = tl.load(kv_scales + kv_ids * stride_scales_n + 3)  # [BK]
 
-            # Dequantize first half [256, BK]:
-            #   elements [0:128] use scale0, elements [128:256] use scale1
+            # Dequantize: select scale per 128-element group, then multiply once.
+            # This avoids duplicate .to(float32) and duplicate multiply temporaries
+            # that tl.where(cond, a*x, b*x) would create on both branches.
             mask_lo = offs_d[:, None] < 128
-            kv_blk0 = tl.where(
-                mask_lo,
-                kv_fp8_0.to(tl.float32) * scale0[None, :],
-                kv_fp8_0.to(tl.float32) * scale1[None, :],
-            ).to(tl.bfloat16)
+            kv_fp8_0_f32 = kv_fp8_0.to(tl.float32)
+            scale_01 = tl.where(mask_lo, scale0[None, :], scale1[None, :])
+            kv_blk0 = (kv_fp8_0_f32 * scale_01).to(tl.bfloat16)
 
-            # Dequantize second half [256, BK]:
-            #   elements [0:128] use scale2, elements [128:256] use scale3
-            kv_blk1 = tl.where(
-                mask_lo,
-                kv_fp8_1.to(tl.float32) * scale2[None, :],
-                kv_fp8_1.to(tl.float32) * scale3[None, :],
-            ).to(tl.bfloat16)
+            kv_fp8_1_f32 = kv_fp8_1.to(tl.float32)
+            scale_23 = tl.where(mask_lo, scale2[None, :], scale3[None, :])
+            kv_blk1 = (kv_fp8_1_f32 * scale_23).to(tl.bfloat16)
         else:
             # BF16 mode: load directly
             kv_ptr = kv_base + offs_d[:, None] + kv_ids[None, :] * stride_kvn
@@ -305,17 +308,20 @@ def _sparse_decode_kernel(
         alpha = tl.math.exp(max_log - new_max)
         sum_exp = sum_exp * alpha + sum_qk
 
-        # Accumulate P @ V (V = K NoPE for MLA)
+        # Accumulate P @ V (V = K NoPE for MLA).
+        # acc is [BDP, BH], so P@V = dot(kv_blk[BDP, BK], exp_qk_t[BK, BH]).
+        # Only exp_qk_t ([BK, BH], tiny) needs trans, not kv_blk ([BDP, BK]).
+        exp_qk_t = tl.trans(exp_qk.to(tl.bfloat16))  # [BK, BH]
         acc0 = tl.dot(
-            exp_qk.to(tl.bfloat16),
-            kv_blk0.trans(),
-            acc0 * alpha[:, None],
+            kv_blk0,
+            exp_qk_t,
+            acc0 * alpha[None, :],
             out_dtype=tl.float32,
         )
         acc1 = tl.dot(
-            exp_qk.to(tl.bfloat16),
-            kv_blk1.trans(),
-            acc1 * alpha[:, None],
+            kv_blk1,
+            exp_qk_t,
+            acc1 * alpha[None, :],
             out_dtype=tl.float32,
         )
         max_log = new_max
@@ -335,8 +341,11 @@ def _sparse_decode_kernel(
     else:
         factor = 1.0 / sum_exp
 
-    out_vals0 = tl.where(valid_mask[:, None], acc0 * factor[:, None], 0.0)
-    out_vals1 = tl.where(valid_mask[:, None], acc1 * factor[:, None], 0.0)
+    # Transpose acc [BDP, BH] -> [BH, BDP] for output (done once outside loop)
+    acc0_t = tl.trans(acc0)  # [BH, BDP]
+    acc1_t = tl.trans(acc1)  # [BH, BDP]
+    out_vals0 = tl.where(valid_mask[:, None], acc0_t * factor[:, None], 0.0)
+    out_vals1 = tl.where(valid_mask[:, None], acc1_t * factor[:, None], 0.0)
 
     # Store output
     o_ptr = o_base + offs_h[:, None] * stride_oh + offs_d[None, :]
@@ -458,8 +467,9 @@ def _sparse_decode_model1_kernel(
 
     max_log = tl.full([BH], float("-inf"), dtype=tl.float32)
     sum_exp = tl.full([BH], 0.0, dtype=tl.float32)
-    acc0 = tl.zeros([BH, BDP], dtype=tl.float32)
-    acc1 = tl.zeros([BH, BDP], dtype=tl.float32)
+    # acc is [BDP, BH] (transposed) to avoid kv_blk.trans() in P@V.
+    acc0 = tl.zeros([BDP, BH], dtype=tl.float32)
+    acc1 = tl.zeros([BDP, BH], dtype=tl.float32)
 
     topk_len = tl.load(topk_length_ptr) if HAVE_TOPK_LENGTH else TOPK
     NK = tl.cdiv(topk_len, BK)
@@ -562,16 +572,18 @@ def _sparse_decode_model1_kernel(
         sum_qk = tl.sum(exp_qk, axis=1)
         alpha = tl.math.exp(max_log - new_max)
         sum_exp = sum_exp * alpha + sum_qk
+        # acc [BDP, BH]: P@V = dot(kv_blk[BDP, BK], exp_qk_t[BK, BH])
+        exp_qk_t = tl.trans(exp_qk.to(tl.bfloat16))  # [BK, BH]
         acc0 = tl.dot(
-            exp_qk.to(tl.bfloat16),
-            kv_blk0.trans(),
-            acc0 * alpha[:, None],
+            kv_blk0,
+            exp_qk_t,
+            acc0 * alpha[None, :],
             out_dtype=tl.float32,
         )
         acc1 = tl.dot(
-            exp_qk.to(tl.bfloat16),
-            kv_blk1.trans(),
-            acc1 * alpha[:, None],
+            kv_blk1,
+            exp_qk_t,
+            acc1 * alpha[None, :],
             out_dtype=tl.float32,
         )
         max_log = new_max
@@ -681,16 +693,18 @@ def _sparse_decode_model1_kernel(
             sum_qk = tl.sum(exp_qk, axis=1)
             alpha = tl.math.exp(max_log - new_max)
             sum_exp = sum_exp * alpha + sum_qk
+            # acc [BDP, BH]: P@V = dot(kv_blk[BDP, BK], exp_qk_t[BK, BH])
+            exp_qk_t = tl.trans(exp_qk.to(tl.bfloat16))  # [BK, BH]
             acc0 = tl.dot(
-                exp_qk.to(tl.bfloat16),
-                kv_blk0.trans(),
-                acc0 * alpha[:, None],
+                kv_blk0,
+                exp_qk_t,
+                acc0 * alpha[None, :],
                 out_dtype=tl.float32,
             )
             acc1 = tl.dot(
-                exp_qk.to(tl.bfloat16),
-                kv_blk1.trans(),
-                acc1 * alpha[:, None],
+                kv_blk1,
+                exp_qk_t,
+                acc1 * alpha[None, :],
                 out_dtype=tl.float32,
             )
             max_log = new_max
@@ -707,8 +721,11 @@ def _sparse_decode_model1_kernel(
     else:
         factor = 1.0 / sum_exp
 
-    out_vals0 = tl.where(valid_mask[:, None], acc0 * factor[:, None], 0.0)
-    out_vals1 = tl.where(valid_mask[:, None], acc1 * factor[:, None], 0.0)
+    # Transpose acc [BDP, BH] -> [BH, BDP] for output
+    acc0_t = tl.trans(acc0)  # [BH, BDP]
+    acc1_t = tl.trans(acc1)  # [BH, BDP]
+    out_vals0 = tl.where(valid_mask[:, None], acc0_t * factor[:, None], 0.0)
+    out_vals1 = tl.where(valid_mask[:, None], acc1_t * factor[:, None], 0.0)
     o_ptr = o_base + offs_h[:, None] * stride_oh + offs_d[None, :]
     tl.store(o_ptr, out_vals0.to(tl.bfloat16))
     tl.store(o_ptr + BDP, out_vals1.to(tl.bfloat16))
@@ -782,10 +799,13 @@ def _dense_decode_kernel(
     )
     q_pe = tl.load(Q_ptr + offs_q_pe, mask=mask_head[:, None], other=0.0)
 
-    # Online softmax accumulators
+    # Online softmax accumulators.
+    # acc is [HEAD_DIM_V, BLOCK_H] (transposed) to avoid v_c.trans() copies:
+    #   QK^T = dot(q_nope[BH, HDV], v_c[HDV, BN])  -- no trans needed
+    #   P@V  = dot(v_c[HDV, BN], p_t[BN, BH])      -- only p_t is tiny
     e_max = tl.full([BLOCK_H], value=float("-inf"), dtype=tl.float32)
     e_sum = tl.zeros([BLOCK_H], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_H, HEAD_DIM_V], dtype=tl.float32)
+    acc = tl.zeros([HEAD_DIM_V, BLOCK_H], dtype=tl.float32)
 
     cur_batch_seq_len = tl.load(Seq_lens + i_b)
     Block_table += i_b * stride_bt_b
@@ -798,13 +818,12 @@ def _dense_decode_kernel(
         kv_page_number = tl.load(Block_table + offs_n // PAGE_SIZE)
         kv_loc = kv_page_number * PAGE_SIZE + offs_n % PAGE_SIZE
 
-        # Load V (NoPE part)
-        offs_v_c = kv_loc[:, None] * stride_kv_bs + offs_d_nope[None, :]
+        # Load V (NoPE part) as [HEAD_DIM_V, BLOCK_N] so QK^T needs no trans.
+        offs_v_c = kv_loc[None, :] * stride_kv_bs + offs_d_nope[:, None]
         v_c = tl.load(KV_cache + offs_v_c)
-        k_c = tl.trans(v_c)
 
-        # QK = q_nope @ k_nope^T
-        qk = tl.dot(q_nope, k_c)
+        # QK = q_nope @ v_c  (v_c is already [HEAD_DIM_V, BLOCK_N])
+        qk = tl.dot(q_nope, v_c)
 
         # Add RoPE contribution
         offs_k_pe = kv_loc[None, :] * stride_kv_bs + offs_d_pe[:, None]
@@ -816,8 +835,10 @@ def _dense_decode_kernel(
         n_e_max = tl.maximum(tl.max(qk, 1), e_max)
         re_scale = tl.exp(e_max - n_e_max)
         p = tl.exp(qk - n_e_max[:, None])
-        acc *= re_scale[:, None]
-        acc = tl.dot(p.to(v_c.dtype), v_c, acc=acc)
+        acc *= re_scale[None, :]
+        # P@V = dot(v_c[HDV, BN], p_t[BN, BH]) -> acc[HDV, BH], no v_c trans
+        p_t = tl.trans(p.to(v_c.dtype))  # [BLOCK_N, BLOCK_H], tiny
+        acc = tl.dot(v_c, p_t, acc=acc)
         e_sum = e_sum * re_scale + tl.sum(p, 1)
         e_max = n_e_max
         offs_n += BLOCK_N
@@ -829,11 +850,10 @@ def _dense_decode_kernel(
         )
         kv_loc = kv_page_number * PAGE_SIZE + offs_n % PAGE_SIZE
 
-        offs_v_c = kv_loc[:, None] * stride_kv_bs + offs_d_nope[None, :]
-        v_c = tl.load(KV_cache + offs_v_c, mask=mask_kvsplit[:, None], other=0.0)
-        k_c = tl.trans(v_c)
+        offs_v_c = kv_loc[None, :] * stride_kv_bs + offs_d_nope[:, None]
+        v_c = tl.load(KV_cache + offs_v_c, mask=mask_kvsplit[None, :], other=0.0)
 
-        qk = tl.dot(q_nope, k_c)
+        qk = tl.dot(q_nope, v_c)
 
         offs_k_pe = kv_loc[None, :] * stride_kv_bs + offs_d_pe[:, None]
         k_pe = tl.load(KV_cache + offs_k_pe, mask=mask_kvsplit[None, :], other=0.0)
@@ -845,11 +865,14 @@ def _dense_decode_kernel(
         n_e_max = tl.maximum(tl.max(qk, 1), e_max)
         re_scale = tl.exp(e_max - n_e_max)
         p = tl.exp(qk - n_e_max[:, None])
-        acc *= re_scale[:, None]
-        acc = tl.dot(p.to(v_c.dtype), v_c, acc=acc)
+        acc *= re_scale[None, :]
+        p_t = tl.trans(p.to(v_c.dtype))  # [BLOCK_N, BLOCK_H], tiny
+        acc = tl.dot(v_c, p_t, acc=acc)
         e_sum = e_sum * re_scale + tl.sum(p, 1)
         e_max = n_e_max
 
+    # Transpose acc [HEAD_DIM_V, BLOCK_H] -> [BLOCK_H, HEAD_DIM_V] for output
+    acc_t = tl.trans(acc)
     # Store output
     offs_o = (
         i_b * stride_o_b
@@ -859,7 +882,7 @@ def _dense_decode_kernel(
     )
     tl.store(
         Out + offs_o,
-        (acc / e_sum[:, None]).to(Out.dtype.element_ty),
+        (acc_t / e_sum[:, None]).to(Out.dtype.element_ty),
         mask=mask_head[:, None],
     )
 
