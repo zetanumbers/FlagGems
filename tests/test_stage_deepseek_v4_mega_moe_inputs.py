@@ -96,7 +96,7 @@ def _make_inputs(num_tokens, hidden_size, top_k, device):
     not _supports_fp8e4nv(), reason="requires cuda with fp8e4nv support or npu with fp8e4nv support."
 )
 def test_stage_deepseek_v4_mega_moe_inputs_accuracy(num_tokens, hidden_size, top_k):
-    if flag_gems.devie == "cuda":
+    if flag_gems.device == "cuda":
         device = "cuda"
     else:
         device = "npu"
