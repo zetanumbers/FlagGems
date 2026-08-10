@@ -283,6 +283,10 @@ def test_accuracy_svd_fallback_modes(shape, some):
     flag_gems.vendor_name == "sunrise",
     reason="Issue #3856:sunrise does not support complex dtype",
 )
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="Issues #3267: Ascend NPU does not support complex dtype",
+    )
 @pytest.mark.svd
 def test_accuracy_svd_non_contiguous_empty_and_complex():
     inputs = [
@@ -308,6 +312,10 @@ def test_accuracy_svd_non_contiguous_empty_and_complex():
     flag_gems.vendor_name == "sunrise",
     reason="Issue #3856:sunrise does not support complex dtype",
 )
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="Issues #3267: Ascend NPU does not support complex dtype",
+    )
 @pytest.mark.svd
 @pytest.mark.parametrize("shape", SVD_COMPLEX64_SHAPES)
 def test_accuracy_svd_complex64_reconstruction(shape):
