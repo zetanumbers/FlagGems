@@ -39,6 +39,10 @@ def double(in_ptr, out_ptr, n, TILE_SIZE: tl.constexpr):
     flag_gems.vendor_name == "mthreads",
     reason="Issue #2854: torch.complex not supported",
 )
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="Issues #3267: Ascend NPU does not support complex dtype",
+    )
 def test_typed_pointer():
     real = torch.randn(10, 10, device=flag_gems.device)
     imag = torch.randn(10, 10, device=flag_gems.device)
@@ -65,6 +69,10 @@ def test_typed_pointer():
     flag_gems.vendor_name == "mthreads",
     reason="Issue #2854: torch.complex not supported",
 )
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="Issues #3267: Ascend NPU does not support complex dtype",
+    )
 def test_typed_pointer_reinterpret_with_offset():
     real = torch.randn(100, device=flag_gems.device)
     imag = torch.randn(100, device=flag_gems.device)
