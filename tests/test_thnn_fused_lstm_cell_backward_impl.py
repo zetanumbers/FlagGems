@@ -95,13 +95,13 @@ def test_thnn_fused_lstm_cell_backward_impl(shape, dtype):
     hidden_bias = torch.randn(4 * hidden_size, dtype=dtype, device=dev)
 
     # Reference forward on CPU
-    ref_inputs_gates = utils.to_reference(input_gates)
+    ref_input_gates = utils.to_reference(input_gates)
     ref_hidden_gates = utils.to_reference(hidden_gates)
     ref_cx = utils.to_reference(cx)
     ref_input_bias = utils.to_reference(input_bias)
     ref_hidden_bias = utils.to_reference(hidden_bias)
 
-    gates = ref_inputs_gates + ref_hidden_gates + ref_input_bias + ref_hidden_bias
+    gates = ref_input_gates + ref_hidden_gates + ref_input_bias + ref_hidden_bias
     i_gate, f_gate, g_gate, o_gate = gates.chunk(4, dim=1)
     i_gate = torch.sigmoid(i_gate)
     f_gate = torch.sigmoid(f_gate)
@@ -118,10 +118,10 @@ def test_thnn_fused_lstm_cell_backward_impl(shape, dtype):
 
     # Reference backward on CPU
     tanh_cy = torch.tanh(ref_cy)
-    d_cy = ref_grad_cy * o_gate * (1.0 - tanh_cy * tanh_cy) + ref_grad_cy
+    d_cy = ref_grad_hy * o_gate * (1.0 - tanh_cy * tanh_cy) + ref_grad_cy
     grad_i = d_cy * g_gate * i_gate * (1.0 - i_gate)
     grad_f = d_cy * ref_cx * f_gate * (1.0 - f_gate)
-    grad_g = d_cy * i_gate * (1.0 - g_gate)
+    grad_g = d_cy * i_gate * (1.0 - g_gate * g_gate)
     grad_o = ref_grad_hy * tanh_cy * o_gate * (1.0 - o_gate)
     ref_grad_input_gates = torch.cat([grad_i, grad_f, grad_g, grad_o], dim=1)
     ref_grad_cx = d_cy * f_gate
