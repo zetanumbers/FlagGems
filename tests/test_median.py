@@ -414,6 +414,8 @@ def test_median_empty_no_dim(dtype):
 @pytest.mark.median
 @pytest.mark.parametrize("dtype", [torch.float64, torch.int8, torch.uint8])
 def test_median_extra_no_dim_dtypes(dtype):
+    if flag_gems.vendor_name == "ascend" and dtype == torch.float64:
+        pytest.skip("Currently, Ascend does not support float64.")
     inp = _make_input((9,), dtype)
     ref_inp = utils.to_reference(inp)
 
@@ -666,6 +668,8 @@ def test_median_large_width(width):
 @pytest.mark.parametrize("width", [257, 1024, 4096])
 @pytest.mark.parametrize("keepdim", KEEPDIM)
 def test_median_float64_key_select(width, keepdim):
+    if flag_gems.vendor_name == "ascend":
+        pytest.skip("Currently, Ascend does not support float64.")
     vals = torch.arange(3 * width, dtype=torch.int64, device=flag_gems.device)
     vals = ((vals * 7919) % (3 * width)) - width
     inp = vals.reshape(3, width).to(torch.float64) / 3.0
@@ -691,6 +695,8 @@ def test_median_float64_key_select(width, keepdim):
 @pytest.mark.median
 @pytest.mark.parametrize("width", [640, 4096])
 def test_median_float64_key_select_nan_first_index(width):
+    if flag_gems.vendor_name == "ascend":
+        pytest.skip("Currently, Ascend does not support float64.")
     inp = torch.randn((3, width), dtype=torch.float64, device=flag_gems.device)
     expected_indices = torch.tensor([0, width // 2, width - 1], device=flag_gems.device)
     inp[0, 0] = float("nan")
