@@ -277,6 +277,7 @@ def kron(A, B):
                 out_batch0,
                 out_batch1,
                 BLOCK_SIZE=indice_tile_size,
+                bisheng_options='-mllvm --cce-enable-dynamic-misched=true',
             )
             grid = lambda meta: (
                 batch_size
