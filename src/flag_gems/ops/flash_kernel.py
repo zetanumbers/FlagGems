@@ -1225,21 +1225,26 @@ def load_from_kvcache(
         k_page_stride,
         boundary_check,
     )
-    k_offset = tl.arange(0, BLOCK_K)[:, None] + cache_offset[None, :]
-    v_offset = tl.arange(0, BLOCK_K)[None, :] + cache_offset[:, None]
+    # Load K first, then V: compute k_offset, load bK, then compute v_offset.
+    # This prevents k_offset [BLOCK_K, BLOCK_N] and v_offset [BLOCK_N, BLOCK_K]
+    # (both int64) from coexisting in UB, halving peak offset memory.
     if d == BLOCK_K:
+        k_offset = tl.arange(0, BLOCK_K)[:, None] + cache_offset[None, :]
         bK_mask = virtual_index[None, :] < max_virtual_index[None, :]
-        bV_mask = virtual_index[:, None] < max_virtual_index[:, None]
         bK = tl.load(k_ptr_base + k_offset, mask=bK_mask, other=0.0)
+        v_offset = tl.arange(0, BLOCK_K)[None, :] + cache_offset[:, None]
+        bV_mask = virtual_index[:, None] < max_virtual_index[:, None]
         bV = tl.load(v_ptr_base + v_offset, mask=bV_mask, other=0.0)
     else:
+        k_offset = tl.arange(0, BLOCK_K)[:, None] + cache_offset[None, :]
         bK_mask = (tl.arange(0, BLOCK_K)[:, None] < d) & (
             virtual_index[None, :] < max_virtual_index[None, :]
         )
+        bK = tl.load(k_ptr_base + k_offset, mask=bK_mask, other=0.0)
+        v_offset = tl.arange(0, BLOCK_K)[None, :] + cache_offset[:, None]
         bV_mask = (tl.arange(0, BLOCK_K)[None, :] < d) & (
             virtual_index[:, None] < max_virtual_index[:, None]
         )
-        bK = tl.load(k_ptr_base + k_offset, mask=bK_mask, other=0.0)
         bV = tl.load(v_ptr_base + v_offset, mask=bV_mask, other=0.0)
     return bK, bV
 

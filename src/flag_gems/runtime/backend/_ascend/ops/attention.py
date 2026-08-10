@@ -124,10 +124,8 @@ def _attn_fwd_inner(
         # update acc
         if not PRE_LOAD_V:
             value = tl.load(V_block_ptr, mask=kv_load_mask[:, None], other=0.0)
-        if fp8_v:
-            p = p.to(tl.float8e5)
-        else:
-            p = p.to(query.dtype)
+        # Convert p directly to value.dtype for dot (avoids redundant
+        # intermediate conversion that wastes a [BLOCK_M, BLOCK_N] temporary)
         p = p.to(value.dtype)
         acc = tl.dot(p, value, acc, allow_tf32=False)
         # update m_i and l_i
@@ -145,22 +143,42 @@ def _attn_fwd_inner(
 # NOTE: we assert BLOCK_N <= HEAD_DIM in _attn_fwd, so for small head_dim,
 # we need to generate more configs.
 configs = runtime.get_tuned_config("attention")
+# Ascend NPU UB is limited to 216 KB (1769472 bits). num_stages > 1 causes
+# pipeline double-buffering of K/V/qk/p buffers, easily overflowing UB.
+# Use num_stages=1 for all configs on Ascend.
 SMALL_HEAD_DIM_CONFIGS = [
     triton.Config(
-        {"BLOCK_M": BM, "BLOCK_N": BN, "PRE_LOAD_V": 0}, num_stages=s, num_warps=w
+        {"BLOCK_M": BM, "BLOCK_N": BN, "PRE_LOAD_V": 0}, num_stages=1, num_warps=w
     )
     for BM in [64, 128]
     for BN in [16, 32]
-    for s in [2, 3, 4]
     for w in [4, 8]
 ]
 configs += SMALL_HEAD_DIM_CONFIGS
+
+
+def _prune_ascend_ub_configs(configs, nargs, **kwargs):
+    """Prune configs that would overflow the 216 KB UB limit on Ascend NPU.
+
+    BLOCK_M=128 with HEAD_DIM > 128 overflows UB:
+      query(128*HD*2) + acc(128*HD*4) = 128*HD*6 bytes; at HD=192 this is
+      144 KB, leaving only 72 KB for K/V/qk/p + compiler overhead — not enough.
+    """
+    head_dim = nargs["HEAD_DIM"]
+    pruned = []
+    for cfg in configs:
+        bm = cfg.kwargs.get("BLOCK_M", 0)
+        if bm == 128 and head_dim > 128:
+            continue
+        pruned.append(cfg)
+    return pruned
 
 
 @libentry()
 @libtuner(
     configs=list(filter(partial(keep, must_keep=SMALL_HEAD_DIM_CONFIGS), configs)),
     key=["KV_CTX", "HEAD_DIM"],
+    prune_configs_by={"early_config_prune": _prune_ascend_ub_configs},
 )
 @triton.jit
 def _attn_fwd(

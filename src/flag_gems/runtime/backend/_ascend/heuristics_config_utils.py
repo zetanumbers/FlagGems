@@ -326,11 +326,15 @@ HEURISTICS_CONFIGS = {
         "BLOCK_M": lambda args: 16,
         "BLOCK_N": lambda args: 16,
         "num_warps": lambda args: 4,
-        "num_stages": lambda args: 3,
+        "num_stages": lambda args: 1,
     },
     # Flash attention varlen configs sized for 216 KB UB limit.
-    # bK .trans() doubles K footprint; acc_ is [BLOCK_M, BLOCK_K] fp32.
-    # For head_size > 128 (BLOCK_K=256), BLOCK_M must be <= 64.
+    # Paged path: load_from_kvcache creates [BLOCK_K, BLOCK_N] int64 offset
+    # arrays (8 bytes/elem). For head_size > 128 (BLOCK_K=256), BLOCK_N=32
+    # makes each offset array 64 KB; two coexisting arrays overflow UB.
+    # With write-level fix (k_offset freed before v_offset), peak is 64 KB,
+    # but combined with bQ+acc_ (96 KB at BLOCK_M=64) it still exceeds 216 KB.
+    # Solution: BLOCK_N=16 when head_size > 128 (offset array = 32 KB).
     # args[33] is head_size (d) in fwd_params.__slots__.
     "mha_block_128": {
         "BLOCK_M": lambda args: 128 if args[33] <= 128 else 64,
@@ -340,13 +344,13 @@ HEURISTICS_CONFIGS = {
     },
     "mha_block_64": {
         "BLOCK_M": lambda args: 64,
-        "BLOCK_N": lambda args: 32,
+        "BLOCK_N": lambda args: 16 if args[33] > 128 else 32,
         "num_warps": lambda args: 4,
         "num_stages": lambda args: 1,
     },
     "mha_block_32": {
         "BLOCK_M": lambda args: 32,
-        "BLOCK_N": lambda args: 32,
+        "BLOCK_N": lambda args: 16 if args[33] > 128 else 32,
         "num_warps": lambda args: 4,
         "num_stages": lambda args: 1,
     },
