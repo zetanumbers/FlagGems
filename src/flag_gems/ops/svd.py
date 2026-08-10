@@ -267,9 +267,9 @@ def _small_jacobi_svd_kernel(
         ident_col = tl.where(cols == j, 1.0, 0.0)
         tl.store(vw_base + j * K + cols, ident_col, mask=col_mask)
 
-    for _ in tl.static_range(0, SWEEPS):
-        for p in tl.static_range(0, K):
-            for q in tl.static_range(p + 1, K):
+    for _ in range(SWEEPS):
+        for p in range(K):
+            for q in range(p + 1, K):
                 ap = tl.load(aw_base + p * ROWS + rows, mask=row_mask, other=0.0)
                 aq = tl.load(aw_base + q * ROWS + rows, mask=row_mask, other=0.0)
                 alpha = tl.sum(ap * ap)
@@ -364,9 +364,9 @@ def _small_jacobi_svals_kernel(
             )
         tl.store(aw_base + j * ROWS + rows, vals, mask=row_mask)
 
-    for _ in tl.static_range(0, SWEEPS):
-        for p in tl.static_range(0, K):
-            for q in tl.static_range(p + 1, K):
+    for _ in range(SWEEPS):
+        for p in range(K):
+            for q in range(p + 1, K):
                 ap = tl.load(aw_base + p * ROWS + rows, mask=row_mask, other=0.0)
                 aq = tl.load(aw_base + q * ROWS + rows, mask=row_mask, other=0.0)
                 alpha = tl.sum(ap * ap)
@@ -1524,7 +1524,9 @@ def _small_jacobi_singular_values(input):
     s = torch.empty((batch, k), dtype=input.dtype, device=input.device)
     block_r = triton.next_power_of_2(rows)
     block_k = triton.next_power_of_2(k)
+    # sweeps = 5 if k <= 4 else 8
     sweeps = 3 if k <= 4 else 5
+
     with torch_device_fn.device(input.device):
         _small_jacobi_svals_kernel[(batch,)](
             a,
@@ -1555,7 +1557,9 @@ def _small_jacobi_svd(input):
     v = torch.empty((batch, n, k), dtype=input.dtype, device=input.device)
     block_r = triton.next_power_of_2(rows)
     block_k = triton.next_power_of_2(k)
+    # sweeps = 5 if k <= 4 else 8
     sweeps = 3 if k <= 4 else 5
+
     with torch_device_fn.device(input.device):
         _small_jacobi_svd_kernel[(batch,)](
             a,
