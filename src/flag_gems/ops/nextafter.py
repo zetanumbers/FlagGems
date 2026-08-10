@@ -92,10 +92,15 @@ def nextafter_func(input, other):
         neg_zero_up = ~is_positive & is_going_up & (x_int == 0x8000)
         is_zero_cross = pos_zero_down | neg_zero_up
 
+        nan_src = tl.where(x_is_nan, x_int, y_int)
         result_int = tl.where(
-            is_nan | is_equal,
-            x_int,  # return input bits as-is (NaN or self)
-            tl.where(is_zero_cross, x_int + cross_const, x_int + normal_inc),
+            is_nan,
+            nan_src,
+            tl.where(
+                is_equal,
+                x_int,
+                tl.where(is_zero_cross, x_int + cross_const, x_int + normal_inc),
+            ),
         )
 
         return result_int.to(input.dtype, bitcast=True)
