@@ -337,13 +337,13 @@ HEURISTICS_CONFIGS = {
     # Solution: BLOCK_N=16 when head_size > 128 (offset array = 32 KB).
     # args[33] is head_size (d) in fwd_params.__slots__.
     "mha_block_128": {
-        "BLOCK_M": lambda args: 128 if args[33] <= 128 else 64,
+        "BLOCK_M": lambda args: 128 if args[33] <= 128 else 32,
         "BLOCK_N": lambda args: 32 if args[33] <= 128 else 16,
         "num_warps": lambda args: 4,
         "num_stages": lambda args: 1,
     },
     "mha_block_64": {
-        "BLOCK_M": lambda args: 64,
+        "BLOCK_M": lambda args: 32 if args[33] > 128 else 64,
         "BLOCK_N": lambda args: 16 if args[33] > 128 else 32,
         "num_warps": lambda args: 4,
         "num_stages": lambda args: 1,
