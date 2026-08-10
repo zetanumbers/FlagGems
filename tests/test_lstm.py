@@ -2,6 +2,7 @@ import pytest
 import torch
 
 import flag_gems
+from flag_gems.ops.lstm import lstm as gems_lstm
 
 from . import accuracy_utils as utils
 
@@ -65,10 +66,10 @@ def test_lstm(
     c0 = torch.randn(state_shape, device=flag_gems.device, dtype=dtype)
     params = tuple(lstm._flat_weights)
 
-    ref_input = utils.to_reference(input)
-    ref_h0 = utils.to_reference(h0)
-    ref_c0 = utils.to_reference(c0)
-    ref_params = tuple(utils.to_reference(param) for param in params)
+    ref_input = utils.to_reference(input).cpu()
+    ref_h0 = utils.to_reference(h0).cpu()
+    ref_c0 = utils.to_reference(c0).cpu()
+    ref_params = tuple(utils.to_reference(param).cpu() for param in params)
     ref_out, ref_hn, ref_cn = torch.lstm(
         ref_input,
         (ref_h0, ref_c0),
@@ -81,8 +82,9 @@ def test_lstm(
         batch_first,
     )
 
+
     with flag_gems.use_gems():
-        res_out, res_hn, res_cn = torch.lstm(
+        res_out, res_hn, res_cn = gems_lstm(
             input,
             (h0, c0),
             params,
@@ -93,6 +95,14 @@ def test_lstm(
             bidirectional,
             batch_first,
         )
+
+    ref_out = ref_out.to(flag_gems.device)
+    ref_hn = ref_hn.to(flag_gems.device)
+    ref_cn = ref_cn.to(flag_gems.device)
+
+    res_out = res_out.to(flag_gems.device)
+    res_hn = res_hn.to(flag_gems.device)
+    res_cn = res_cn.to(flag_gems.device)
 
     atol = 3e-2 if dtype is torch.bfloat16 else 2e-2 if dtype is torch.float16 else 1e-4
     utils.gems_assert_close(res_out, ref_out, dtype, atol=atol)
