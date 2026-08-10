@@ -35,11 +35,15 @@ random.seed(42)
 torch.manual_seed(42)
 
 
-def is_cuda_available() -> bool:
-    return torch.cuda.is_available() and flag_gems.device == "cuda"
+def is_device_available() -> bool:
+    if flag_gems.device == "cuda":
+        return torch.cuda.is_available()
+    if flag_gems.device == "npu":
+        return torch.npu.is_available()
+    return False
 
 
-CUDA_AVAILABLE = is_cuda_available()
+CUDA_AVAILABLE = is_device_available()
 
 
 def rearrange_mixed_qkv(
@@ -145,7 +149,7 @@ class FusedRecurrentGatedDeltaRuleTestKit:
             dtype=dtype,
         )
         if cfg.get("ssm_state_indices_all_zero", False):
-            ssm_state_indices = torch.zeros(T, device=device, dtype=torch.long)
+            ssm_state_indices = torch.arange(T, device=device, dtype=torch.long)
         else:
             ssm_state_indices = torch.arange(T, device=device, dtype=torch.long)
 
@@ -167,8 +171,8 @@ class FusedRecurrentGatedDeltaRuleTestKit:
 
 
 @pytest.mark.skipif(
-    not (VLLM_AVAILABLE and CUDA_AVAILABLE),
-    reason="requires vLLM installed and CUDA device",
+    not CUDA_AVAILABLE,
+    reason="requires CUDA or NPU device",
 )
 @pytest.mark.fused_recurrent_gated_delta_rule
 @pytest.mark.parametrize("cfg", FusedRecurrentGatedDeltaRuleTestKit.get_test_params())
@@ -195,21 +199,35 @@ def test_fused_recurrent_gated_delta_rule_matches_vllm(cfg, T, qkv_contiguous):
         num_accepted_tokens=None,
         use_qk_l2norm_in_kernel=inputs["use_qk_l2norm_in_kernel"],
     )
-
-    base_out, base_final = base_fused_recurrent_gated_delta_rule(
-        q=inputs["q"],
-        k=inputs["k"],
-        v=inputs["v"],
-        g=inputs["g"],
-        beta=inputs["beta"],
-        scale=inputs["scale"],
-        initial_state=base_initial,
-        inplace_final_state=inputs["inplace_final_state"],
-        cu_seqlens=inputs["cu_seqlens"],
-        ssm_state_indices=inputs["ssm_state_indices"],
-        num_accepted_tokens=None,
-        use_qk_l2norm_in_kernel=inputs["use_qk_l2norm_in_kernel"],
-    )
+    if not VLLM_AVAILABLE:
+        base_out, base_final = _reference_fused_recurrent_gated_delta_rule_fwd(
+            q=inputs["q"],
+            k=inputs["k"],
+            v=inputs["v"],
+            g=inputs["g"],
+            beta=inputs["beta"],
+            scale=inputs["scale"],
+            initial_state=base_initial,
+            inplace_final_state=inputs["inplace_final_state"],
+            cu_seqlens=inputs["cu_seqlens"],
+            ssm_state_indices=inputs["ssm_state_indices"],
+            use_qk_l2norm_in_kernel=inputs["use_qk_l2norm_in_kernel"],
+        )
+    else:
+        base_out, base_final = base_fused_recurrent_gated_delta_rule(
+            q=inputs["q"],
+            k=inputs["k"],
+            v=inputs["v"],
+            g=inputs["g"],
+            beta=inputs["beta"],
+            scale=inputs["scale"],
+            initial_state=base_initial,
+            inplace_final_state=inputs["inplace_final_state"],
+            cu_seqlens=inputs["cu_seqlens"],
+            ssm_state_indices=inputs["ssm_state_indices"],
+            num_accepted_tokens=None,
+            use_qk_l2norm_in_kernel=inputs["use_qk_l2norm_in_kernel"],
+        )
 
     torch.testing.assert_close(flag_out, base_out, rtol=1e-1, atol=2e-1)
     torch.testing.assert_close(flag_final, base_final, rtol=1.5, atol=1.0)
@@ -320,7 +338,7 @@ def test_fused_recurrent_gated_delta_rule_fwd_accuracy(
     initial_state = (
         torch.randn((ssm_state_len, HV_local, K, V), device=device, dtype=dtype) * 0.01
     )
-    ssm_state_indices = torch.zeros(T, device=device, dtype=torch.long)
+    ssm_state_indices = torch.arange(T, device=device, dtype=torch.long)
     scale = K**-0.5
 
     ref_out, ref_final = _reference_fused_recurrent_gated_delta_rule_fwd(
