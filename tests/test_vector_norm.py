@@ -63,7 +63,7 @@ def test_accuracy_vectornorm(shape, ord, dim, keepdim, dtype):
         pytest.skip("Issue #3796: not working")
 
     inp = torch.randn(shape, dtype=dtype, device=flag_gems.device)
-    ref_inp = utils.to_reference(inp, True)
+    ref_inp = utils.to_reference(inp, True).to(torch.float64)
 
     ref_out = torch.linalg.vector_norm(ref_inp, ord, dim, keepdim)
     with flag_gems.use_gems():
