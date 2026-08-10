@@ -239,7 +239,6 @@ def test_sparse_mla_forward_edge_cases(config):
 
 
 # Device compatibility test
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA device required")
 @pytest.mark.sparse_mla_fwd_interface
 def test_sparse_mla_device_compatibility():
     """Test device compatibility"""

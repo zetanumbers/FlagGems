@@ -27,10 +27,18 @@ else:
 
 logger = logging.getLogger(__name__)
 
-spar_mla_fwd_configs = [
-    triton.Config({"num_stages": 4}, num_warps=8),
-    triton.Config({"num_stages": 2}, num_warps=4),
-]
+_is_npu = not torch.cuda.is_available()
+
+if _is_npu:
+    spar_mla_fwd_configs = [
+        triton.Config({"num_stages": 1}, num_warps=4),
+        triton.Config({"num_stages": 1}, num_warps=8),
+    ]
+else:
+    spar_mla_fwd_configs = [
+        triton.Config({"num_stages": 4}, num_warps=8),
+        triton.Config({"num_stages": 2}, num_warps=4),
+    ]
 
 
 @triton.autotune(  # Decorate the kernel
@@ -326,9 +334,13 @@ def triton_sparse_mla_fwd_interface(
     G = H // VG
     if sm_scale is None:
         sm_scale = DT**-0.5
-    BH = max(16, min(64, triton.next_power_of_2(G)))
+    if _is_npu:
+        BH = max(16, min(16, triton.next_power_of_2(G)))
+        BK = 16
+    else:
+        BH = max(16, min(64, triton.next_power_of_2(G)))
+        BK = 32
     NH = triton.cdiv(G, BH)
-    BK = 32
     output = torch.zeros((B, SQ, H, D), device=q.device, dtype=q.dtype)
     lse = torch.full((B, SQ, H), float("-inf"), device=q.device, dtype=q.dtype)
     grid = (B, SQ, VG * NH)  # (SQ//BQ, B*H)
