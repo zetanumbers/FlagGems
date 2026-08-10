@@ -75,8 +75,7 @@ def _is_float32_cuda_matrix(input):
 
 def _is_low_precision_cuda_matrix(input):
     return (
-        input.is_cuda
-        and input.dtype in (torch.float16, torch.bfloat16)
+        input.dtype in (torch.float16, torch.bfloat16)
         and input.dim() >= 2
     )
 
