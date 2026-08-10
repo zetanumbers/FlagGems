@@ -30,16 +30,18 @@ from flag_gems.runtime import device as _runtime_device
 from flag_gems.utils.triton_version_utils import has_triton_tle
 
 # On Ascend NPU, the Unified Buffer (UB) is limited to 216 KB (1769472 bits).
-# The kernel uses transposed acc layout ([BDP, BH] / [HEAD_DIM_V, BLOCK_H]) to
-# avoid kv_blk.trans() / v_c.trans() copies in P@V.  This eliminates ~32 KB of
-# duplicate UB per loop iteration.  Only a tiny exp_qk_t ([BK, BH]) or p_t
-# ([BLOCK_N, BLOCK_H]) trans is needed, which is negligible.
-# Dequant also uses single .to(float32) + single multiply (no branch duplication).
+# Three write-level optimizations reduce UB without changing tile size:
+#   1. Transposed acc ([BDP, BH] / [HEAD_DIM_V, BLOCK_H]) avoids kv_blk.trans()
+#      / v_c.trans() copies in P@V.  Only tiny exp_qk_t ([BK, BH]) is transposed.
+#   2. Interleaved dequant + QK^T: half0 fp32 temporaries (kv_fp8_f32, scale_01)
+#      are freed before half1 dequant begins, halving the dequant peak UB.
+#   3. Single .to(float32) + single multiply in dequant (no branch duplication).
 _IS_ASCEND = _runtime_device.vendor_name == "ascend"
 
 if _IS_ASCEND:
     # V32 sparse decode: BH=16, BK=32.
-    # P@V peak UB (no kv.trans): q(18KB) + acc(33KB) + kv_blk(33KB) + exp_qk_t(1KB) ≈ 85 KB
+    # Dequant half1 peak (interleaved): q(50KB) + kv_blk0(16KB) + fp8(8KB)
+    #   + fp32_tmp(32KB) + scale(32KB) + kv_blk1(16KB) + qk(2KB) ≈ 156 KB
     _SPARSE_DECODE_CONFIGS = [
         triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
     ]
@@ -49,7 +51,7 @@ if _IS_ASCEND:
     ]
     # Dense decode: BLOCK_H=16, BLOCK_N=32.
     # v_c is [512, 32] bf16 (32KB). QK^T and P@V both use v_c directly (no trans).
-    # P@V peak UB: q(18KB) + acc(32KB) + v_c(32KB) + p_t(1KB) ≈ 83 KB
+    # Peak UB: q(18KB) + acc(32KB) + v_c(32KB) + p_t(1KB) ≈ 83 KB
     _DENSE_DECODE_CONFIGS = [
         triton.Config({"BLOCK_H": 16, "BLOCK_N": 32}, num_warps=4, num_stages=1),
     ]
@@ -254,39 +256,36 @@ def _sparse_decode_kernel(
         kv_ids = tl.where(mask_ids, kv_ids, 0)
 
         if IS_FP8:
-            # FP8 mode: load FP8 values and dequantize with per-128-element scales
-            # Load NoPE FP8 data: [BDP, BK] for each half
+            # FP8 mode: interleave dequant with QK^T so half0 fp32 temporaries
+            # (kv_fp8_f32, scale_01) can be freed before half1 dequant begins.
+            # This halves the dequant peak UB vs doing both halves then both dots.
             kv_ptr = kv_base + offs_d[:, None] + kv_ids[None, :] * stride_kvn
             kv_fp8_0 = tl.load(kv_ptr, cache_modifier=".cg")  # [256, BK] float8
             kv_fp8_1 = tl.load(kv_ptr + BDP, cache_modifier=".cg")  # [256, BK] float8
-
-            # Load 4 scales per token separately
-            # Scale layout: [num_tokens, 4] float32
             scale0 = tl.load(kv_scales + kv_ids * stride_scales_n + 0)  # [BK]
             scale1 = tl.load(kv_scales + kv_ids * stride_scales_n + 1)  # [BK]
             scale2 = tl.load(kv_scales + kv_ids * stride_scales_n + 2)  # [BK]
             scale3 = tl.load(kv_scales + kv_ids * stride_scales_n + 3)  # [BK]
-
-            # Dequantize: select scale per 128-element group, then multiply once.
-            # This avoids duplicate .to(float32) and duplicate multiply temporaries
-            # that tl.where(cond, a*x, b*x) would create on both branches.
             mask_lo = offs_d[:, None] < 128
+
+            # Dequant half0 + QK^T half0
             kv_fp8_0_f32 = kv_fp8_0.to(tl.float32)
             scale_01 = tl.where(mask_lo, scale0[None, :], scale1[None, :])
             kv_blk0 = (kv_fp8_0_f32 * scale_01).to(tl.bfloat16)
+            qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
 
+            # Dequant half1 + QK^T half1 (half0 temporaries freed)
             kv_fp8_1_f32 = kv_fp8_1.to(tl.float32)
             scale_23 = tl.where(mask_lo, scale2[None, :], scale3[None, :])
             kv_blk1 = (kv_fp8_1_f32 * scale_23).to(tl.bfloat16)
+            qk = tl.dot(q_blk1, kv_blk1, qk, out_dtype=tl.float32)
         else:
             # BF16 mode: load directly
             kv_ptr = kv_base + offs_d[:, None] + kv_ids[None, :] * stride_kvn
             kv_blk0 = tl.load(kv_ptr, cache_modifier=".cg")  # [BDP, BK]
             kv_blk1 = tl.load(kv_ptr + BDP, cache_modifier=".cg")  # [BDP, BK]
-
-        # Compute QK^T
-        qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
-        qk = tl.dot(q_blk1, kv_blk1, qk, out_dtype=tl.float32)
+            qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
+            qk = tl.dot(q_blk1, kv_blk1, qk, out_dtype=tl.float32)
         if DQK == 576:
             if IS_FP8:
                 # RoPE part from separate tensor
@@ -522,6 +521,8 @@ def _sparse_decode_model1_kernel(
         scale5 = (scale5_u8.to(tl.int32) << 23).to(tl.float32, bitcast=True)
         scale6 = (scale6_u8.to(tl.int32) << 23).to(tl.float32, bitcast=True)
 
+        # Interleave dequant with QK^T so fp32 temporaries (kv_fp8, scale) are
+        # freed before the next half's dequant, halving the dequant peak UB.
         kv_fp8_0 = kv_fp8_0_u8.to(tl.float8e4nv, bitcast=True).to(tl.float32)
         scale_0 = tl.where(
             offs_d[:, None] < 64,
@@ -533,6 +534,7 @@ def _sparse_decode_model1_kernel(
             ),
         )
         kv_blk0 = (kv_fp8_0 * scale_0).to(tl.bfloat16)
+        qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
 
         kv_fp8_1 = kv_fp8_1_u8.to(tl.float8e4nv, bitcast=True).to(tl.float32)
         scale_1 = tl.where(
@@ -541,6 +543,7 @@ def _sparse_decode_model1_kernel(
             tl.where(offs_d[:, None] < 128, scale5[None, :], scale6[None, :]),
         )
         nope_tail = (kv_fp8_1 * scale_1).to(tl.bfloat16)
+        qk = tl.dot(q_blk1_nope, nope_tail, qk, out_dtype=tl.float32)
 
         rope_ptr = (token_base + NOPE).to(tl.pointer_type(tl.bfloat16))
         rope_blk = tl.load(
@@ -549,7 +552,12 @@ def _sparse_decode_model1_kernel(
             other=0.0,
             cache_modifier=".cg",
         )
+        qk = tl.dot(q_rope, rope_blk, qk, out_dtype=tl.float32)
+        qk *= sm_scale
+        qk = tl.where(valid_ids[None, :], qk, float("-inf"))
 
+        # Build kv_blk1 [BDP, BK] from nope_tail + rope (for P@V).
+        # Done after QK^T so dequant fp32 temporaries are already freed.
         kv_blk1 = tl.where(
             offs_d[:, None] < (NOPE - BDP),
             nope_tail,
@@ -560,12 +568,6 @@ def _sparse_decode_model1_kernel(
                 cache_modifier=".cg",
             ),
         )
-
-        qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
-        qk = tl.dot(q_blk1_nope, nope_tail, qk, out_dtype=tl.float32)
-        qk = tl.dot(q_rope, rope_blk, qk, out_dtype=tl.float32)
-        qk *= sm_scale
-        qk = tl.where(valid_ids[None, :], qk, float("-inf"))
 
         new_max = tl.maximum(max_log, tl.max(qk, axis=1))
         exp_qk = tl.math.exp(qk - new_max[:, None])
@@ -644,6 +646,7 @@ def _sparse_decode_model1_kernel(
             scale5 = (scale5_u8.to(tl.int32) << 23).to(tl.float32, bitcast=True)
             scale6 = (scale6_u8.to(tl.int32) << 23).to(tl.float32, bitcast=True)
 
+            # Interleave dequant with QK^T (same as main loop)
             kv_fp8_0 = kv_fp8_0_u8.to(tl.float8e4nv, bitcast=True).to(tl.float32)
             scale_0 = tl.where(
                 offs_d[:, None] < 64,
@@ -655,6 +658,7 @@ def _sparse_decode_model1_kernel(
                 ),
             )
             kv_blk0 = (kv_fp8_0 * scale_0).to(tl.bfloat16)
+            qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
 
             kv_fp8_1 = kv_fp8_1_u8.to(tl.float8e4nv, bitcast=True).to(tl.float32)
             scale_1 = tl.where(
@@ -663,6 +667,7 @@ def _sparse_decode_model1_kernel(
                 tl.where(offs_d[:, None] < 128, scale5[None, :], scale6[None, :]),
             )
             nope_tail = (kv_fp8_1 * scale_1).to(tl.bfloat16)
+            qk = tl.dot(q_blk1_nope, nope_tail, qk, out_dtype=tl.float32)
 
             rope_ptr = (token_base + NOPE).to(tl.pointer_type(tl.bfloat16))
             rope_blk = tl.load(
@@ -671,6 +676,11 @@ def _sparse_decode_model1_kernel(
                 other=0.0,
                 cache_modifier=".cg",
             )
+            qk = tl.dot(q_rope, rope_blk, qk, out_dtype=tl.float32)
+            qk *= sm_scale
+            qk = tl.where(valid_ids[None, :], qk, float("-inf"))
+
+            # Build kv_blk1 for P@V (after QK^T, dequant temps freed)
             kv_blk1 = tl.where(
                 offs_d[:, None] < (NOPE - BDP),
                 nope_tail,
@@ -681,12 +691,6 @@ def _sparse_decode_model1_kernel(
                     cache_modifier=".cg",
                 ),
             )
-
-            qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
-            qk = tl.dot(q_blk1_nope, nope_tail, qk, out_dtype=tl.float32)
-            qk = tl.dot(q_rope, rope_blk, qk, out_dtype=tl.float32)
-            qk *= sm_scale
-            qk = tl.where(valid_ids[None, :], qk, float("-inf"))
 
             new_max = tl.maximum(max_log, tl.max(qk, axis=1))
             exp_qk = tl.math.exp(qk - new_max[:, None])
