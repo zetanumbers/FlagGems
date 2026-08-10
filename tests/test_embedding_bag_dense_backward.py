@@ -6,6 +6,21 @@ import flag_gems
 from . import accuracy_utils as utils
 
 
+def _build_bag_intermediates(offsets, bag_sizes_list, num_samples, num_bags, device):
+    """Manually build offset2bag, bag_size, maximum_indices.
+
+    Native _embedding_bag may return empty offset2bag on some backends
+    (e.g. NPU), so we compute these intermediates ourselves.
+    """
+    offset2bag = torch.repeat_interleave(
+        torch.arange(num_bags, device=device),
+        torch.tensor(bag_sizes_list, device=device),
+    )
+    bag_size = torch.tensor(bag_sizes_list, dtype=torch.long, device=device)
+    maximum_indices = torch.zeros(num_bags, dtype=torch.long, device=device)
+    return offset2bag, bag_size, maximum_indices
+
+
 @pytest.mark.embedding_bag_dense_backward
 @pytest.mark.parametrize("num_bags", [3, 8, 16])
 @pytest.mark.parametrize("embedding_dim", [16, 32])
@@ -43,11 +58,21 @@ def test_embedding_bag_dense_backward(num_bags, embedding_dim, dtype):
         dtype=torch.long,
         device=flag_gems.device,
     )
+    if flag_gems.vendor_name == "ascend":
+        # Forward pass to get output (offset2bag from native may be empty on NPU)
+        output, _, _, _ = torch.ops.aten._embedding_bag(
+            weight, indices, offsets, False, 0, False, None, False, -1
+        )
 
-    # Forward pass to get offset2bag, bag_size, maximum_indices
-    output, offset2bag, bag_size, maximum_indices = torch.ops.aten._embedding_bag(
-        weight, indices, offsets, False, 0, False, None, False, -1
-    )
+        # Build intermediates manually for backward
+        offset2bag, bag_size, maximum_indices = _build_bag_intermediates(
+            offsets, bag_sizes_list, num_samples, num_bags, flag_gems.device
+        )
+    else:
+        # Forward pass to get offset2bag, bag_size, maximum_indices
+        output, offset2bag, bag_size, maximum_indices = torch.ops.aten._embedding_bag(
+            weight, indices, offsets, False, 0, False, None, False, -1
+        )
 
     # Compute backward
     grad = torch.randn_like(output)
@@ -122,10 +147,21 @@ def test_embedding_bag_dense_backward_with_weights(num_bags, embedding_dim, dtyp
         device=flag_gems.device,
     )
 
-    # Forward pass
-    output, offset2bag, bag_size, maximum_indices = torch.ops.aten._embedding_bag(
-        weight, indices, offsets, False, 0, False, per_sample_weights, False, -1
-    )
+    if flag_gems.vendor_name == "ascend":
+        # Forward pass
+        output, _, _, _ = torch.ops.aten._embedding_bag(
+            weight, indices, offsets, False, 0, False, per_sample_weights, False, -1
+        )
+
+        # Build intermediates manually for backward
+        offset2bag, bag_size, maximum_indices = _build_bag_intermediates(
+            offsets, bag_sizes_list, num_samples, num_bags, flag_gems.device
+        )
+    else:
+        # Forward pass
+        output, offset2bag, bag_size, maximum_indices = torch.ops.aten._embedding_bag(
+            weight, indices, offsets, False, 0, False, per_sample_weights, False, -1
+        )
 
     # Compute backward
     grad = torch.randn_like(output)
@@ -199,10 +235,21 @@ def test_embedding_bag_dense_backward_mode_sum(num_bags, embedding_dim, dtype):
         device=flag_gems.device,
     )
 
-    # Forward pass with mode=1 (sum)
-    output, offset2bag, bag_size, maximum_indices = torch.ops.aten._embedding_bag(
-        weight, indices, offsets, False, 1, False, None, False, -1
-    )
+    if flag_gems.vendor_name == "ascend":
+        # Forward pass with mode=1 (sum)
+        output, _, _, _ = torch.ops.aten._embedding_bag(
+            weight, indices, offsets, False, 1, False, None, False, -1
+        )
+
+        # Build intermediates manually for backward
+        offset2bag, bag_size, maximum_indices = _build_bag_intermediates(
+            offsets, bag_sizes_list, num_samples, num_bags, flag_gems.device
+        )
+    else:
+        # Forward pass with mode=1 (sum)
+        output, offset2bag, bag_size, maximum_indices = torch.ops.aten._embedding_bag(
+            weight, indices, offsets, False, 1, False, None, False, -1
+        )
 
     # Compute backward
     grad = torch.randn_like(output)
