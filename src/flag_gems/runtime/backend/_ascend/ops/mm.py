@@ -224,3 +224,4 @@ def router_gemm(x, weight):
             dot_out_dtype=dot_out_dtype,
             GROUP_M=8,
         )
+    return c
