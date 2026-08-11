@@ -27,6 +27,7 @@ from flag_gems.ops.flash_kernel import (
     flash_fwd_splitkv_combine_kernel,
     flash_fwd_splitkv_kernel,
     flash_varlen_fwd_kernel,
+    is_even_mn,
 )
 from flag_gems.runtime import torch_device_fn
 from flag_gems.utils.random_utils import philox_backend_seed_offset
@@ -1142,14 +1143,26 @@ def mha_fwd(
                         (n_splits, B, H, Q, D), dtype=torch.float, device=q_device
                     )
                     grid = lambda args: (
-                        triton.cdiv(Q, args["BLOCK_M"]),
+                        triton.cdiv(Q, BM),
                         n_splits,
                         B * H,
                     )
                     splitkv_kernel = flash_fwd_splitkv_kernel[grid]
                     params.o_ptr = out_splits
                     params.softmax_lse_ptr = lse_splits
-                    extra_args = {"blocks_per_split": triton.cdiv(n_blocks, n_splits)}
+                    is_ascend = flag_gems.vendor_name == "ascend"
+                    extra_args = {
+                        "blocks_per_split": triton.cdiv(n_blocks, n_splits),
+                        "BLOCK_M": BM,
+                        "BLOCK_N": BN,
+                        "BLOCK_K": triton.next_power_of_2(D),
+                        "num_warps": 4,
+                        "num_stages": 1 if is_ascend else 3,
+                        "PRE_LOAD_V": True,
+                        "IS_EVEN_MN": is_even_mn(
+                            Q, K, BM, BN, window_size_left, window_size_right
+                        ),
+                    }
                     kernel = splitkv_kernel(*params.args(), **extra_args)
 
                     if D >= 128:

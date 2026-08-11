@@ -252,9 +252,15 @@ def block_n_splitkv_heuristic_spec_args(args):
 
 
 def is_even_mn_spec_args(args):
+    # Compute BLOCK_M/BLOCK_N locally instead of reading from args.
+    # On NPU (triton-ascend), @triton.heuristics evaluates each value
+    # independently, so BLOCK_M/BLOCK_N set by other heuristics are not
+    # available here.
+    bm = block_m_splitkv_heuristic_spec_args(args)
+    bn = block_n_splitkv_heuristic_spec_args(args)
     if (
-        args["seqlen_q"] % args["BLOCK_M"] == 0
-        and args["seqlen_k"] % args["BLOCK_N"] == 0
+        args["seqlen_q"] % bm == 0
+        and args["seqlen_k"] % bn == 0
     ):
         if (
             args["seqlen_q"] % args["seqlen_k"] == 0
@@ -262,10 +268,10 @@ def is_even_mn_spec_args(args):
         ):
             if (
                 args["window_size_left"] == -1
-                or args["window_size_left"] % args["BLOCK_N"] == 0
+                or args["window_size_left"] % bn == 0
             ) and (
                 args["window_size_right"] == -1
-                or args["window_size_right"] % args["BLOCK_N"] == 0
+                or args["window_size_right"] % bn == 0
             ):
                 return True
     return False
@@ -804,17 +810,6 @@ def flash_fwd_splitkv_kernel_heur_block_k(args):
 
 
 @libentry()
-@triton.heuristics(
-    values={
-        "BLOCK_M": block_m_splitkv_heuristic_spec_args,
-        "BLOCK_N": block_n_splitkv_heuristic_spec_args,
-        "BLOCK_K": flash_fwd_splitkv_kernel_heur_block_k,
-        "num_warps": lambda args: 4,
-        "num_stages": lambda args: 3,
-        "PRE_LOAD_V": lambda args: True,
-        "IS_EVEN_MN": is_even_mn_spec_args,
-    }
-)
 @triton.jit(
     do_not_specialize=["seqlen_q", "seqlen_k", "seqlen_q_rounded", "seqlen_k_rounded"]
 )
