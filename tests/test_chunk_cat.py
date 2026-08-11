@@ -76,7 +76,6 @@ def test_chunk_cat_2d_dim1(dtype):
 
 
 @pytest.mark.chunk_cat
-@pytest.mark.skipif(flag_gems.vendor_name == "ascend", reason="Ascend not supported")
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
 def test_chunk_cat_multiple_tensors(dtype):
     # Test with multiple input tensors
