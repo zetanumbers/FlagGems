@@ -24,7 +24,6 @@ from flag_gems.utils import pointwise_dynamic
 logger = logging.getLogger(__name__)
 
 # Maximum supported polynomial degree (arbitrary but safe bound)
-_MAX_POLY_DEGREE: tl.constexpr = 101
 
 
 @pointwise_dynamic(promotion_methods=[(0, 1, "INT_TO_FLOAT")])
@@ -51,6 +50,7 @@ def chebyshev_polynomial_w_func(x, n):
     # Compute W_k for k >= 2 using recurrence
     w_km2 = w0
     w_km1 = w1
+    _MAX_POLY_DEGREE = tl.constexpr(101)
     for k in tl.static_range(2, _MAX_POLY_DEGREE):
         w_k = 2.0 * x_f32 * w_km1 - w_km2
         result = tl.where(n_i32 == k, w_k, result)
