@@ -33,6 +33,7 @@ from .attention import (
 from .baddbmm import baddbmm
 from .bmm import bmm
 from .cat import cat, cat_out
+from .conv_transpose2d import conv_transpose2d
 from .count_nonzero import count_nonzero
 from .cummax import cummax
 from .cummin import cummin
@@ -125,6 +126,7 @@ __all__ = [
     "bmm",
     "cat",
     "cat_out",
+    "conv_transpose2d",
     "count_nonzero",
     "cummax",
     "cummin",

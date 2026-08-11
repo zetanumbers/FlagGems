@@ -209,9 +209,14 @@ ADDITIONAL_CONV_TRANSPOSE2D_CASES = [
 
 
 def _skip_if_unsupported_test_device(dtype):
-    if torch.device(flag_gems.device).type != "cuda":
-        pytest.skip("conv_transpose2d Triton kernels require CUDA")
-    if dtype is torch.bfloat16 and not torch.cuda.is_bf16_supported():
+    device_type = torch.device(flag_gems.device).type
+    if device_type not in ("cuda", "npu"):
+        pytest.skip("conv_transpose2d Triton kernels require CUDA or NPU")
+    if (
+        dtype is torch.bfloat16
+        and device_type == "cuda"
+        and not torch.cuda.is_bf16_supported()
+    ):
         pytest.skip("BF16 conv_transpose2d requires CUDA BF16 support")
 
 
