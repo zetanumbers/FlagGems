@@ -16,7 +16,10 @@ import triton
 import triton.language as tl
 
 from flag_gems import runtime
+from flag_gems.runtime import device as _runtime_device
 from flag_gems.utils import libentry, tl_extra_shim
+
+_IS_ASCEND = _runtime_device.vendor_name == "ascend"
 
 
 @triton.jit
@@ -279,16 +282,42 @@ def keep(cfg, must_keep=None):
     )
 
 
+# Ascend NPU: the yaml attention configs use BLOCK_N=64 which doesn't pass the
+# keep filter ((128,32,4),(128,128,8)). Add BLOCK_N=32 configs with num_stages=1
+# (UB-safe) so flash_fwd_kernel has valid configs on Ascend.
+_ASCEND_FWD_CONFIGS = (
+    [
+        triton.Config(
+            {"BLOCK_M": BM, "BLOCK_N": 32, "PRE_LOAD_V": 0},
+            num_stages=1,
+            num_warps=4,
+        )
+        for BM in [64, 128]
+    ]
+    if _IS_ASCEND
+    else []
+)
+
+_fwd_must_keep = _ASCEND_FWD_CONFIGS if _IS_ASCEND else None
+_fwd_configs = runtime.get_tuned_config("attention")
+if _IS_ASCEND:
+    _fwd_configs = list(_fwd_configs) + _ASCEND_FWD_CONFIGS
+
+
 def prune_fwd_configs(configs, nargs, **kwargs):
     is_dropout = nargs["is_dropout"]
     seqlen_q = nargs["seqlen_q"]
     seqlen_k = nargs["seqlen_k"]
     window_size_left = nargs["window_size_left"]
     window_size_right = nargs["window_size_right"]
+    d = nargs["d"]
 
     pruned = []
     for cfg in configs:
         if is_dropout and not (cfg.num_warps == 4 and cfg.num_stages < 4):
+            continue
+        # On Ascend, filter BLOCK_M=128 when HEAD_DIM > 128 to avoid UB overflow.
+        if _IS_ASCEND and d > 128 and cfg.kwargs["BLOCK_M"] == 128:
             continue
         # Inject IS_EVEN_MN from config's BLOCK_M/BLOCK_N.
         # On NPU (triton-ascend), @triton.heuristics runs before autotune
@@ -309,7 +338,12 @@ def flash_fwd_kernel_heur_block_k(args):
 
 @libentry()
 @triton.autotune(
-    configs=list(filter(keep, runtime.get_tuned_config("attention"))),
+    configs=list(
+        filter(
+            lambda cfg: keep(cfg, must_keep=_fwd_must_keep),
+            _fwd_configs,
+        )
+    ),
     prune_configs_by={"early_config_prune": prune_fwd_configs},
     key=["d", "is_dropout"],
 )

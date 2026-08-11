@@ -169,22 +169,105 @@ def efficient_attn_sdp_forward_native(
         softmax_scale if softmax_scale is not None else (1.0 / math.sqrt(Q.shape[-1]))
     )
 
-    results = torch.ops.aten._scaled_dot_product_efficient_attention(
-        Q_bhsd,
-        K_bhsd,
-        V_bhsd,
-        attn_bias,
-        compute_log_sumexp=True,
-        dropout_p=dropout_p,
-        is_causal=is_causal,
-        scale=scale,
-    )
-    out_bhsd = results[0]
-    lse = results[1]
-    philox_seed = results[2]
-    philox_offset = results[3]
+    if flag_gems.vendor_name == "ascend":
+        # Pure PyTorch implementation: aten::_scaled_dot_product_efficient_attention
+        # is unavailable on NPU backends.
+        S = torch.matmul(Q_bhsd.float(), K_bhsd.float().transpose(-1, -2)) * scale
+        if attn_bias is not None:
+            S = S + attn_bias.float()
+        if is_causal:
+            Sq, Skv = S.shape[-2], S.shape[-1]
+            causal_mask = torch.triu(
+                torch.ones(Sq, Skv, device=S.device, dtype=torch.bool), diagonal=1
+            )
+            S = S.masked_fill(causal_mask, float("-inf"))
+
+        lse = torch.logsumexp(S, dim=-1, keepdim=True).transpose(
+            -1, -2
+        )  # [B, H, 1, Sq]
+        P = torch.exp(S - lse.transpose(-1, -2))
+        out_bhsd = torch.matmul(P, V_bhsd.float()).to(Q_bhsd.dtype).contiguous()
+        philox_seed = 0
+        philox_offset = 0
+    else:
+        results = torch.ops.aten._scaled_dot_product_efficient_attention(
+            Q_bhsd,
+            K_bhsd,
+            V_bhsd,
+            attn_bias,
+            compute_log_sumexp=True,
+            dropout_p=dropout_p,
+            is_causal=is_causal,
+            scale=scale,
+        )
+        out_bhsd = results[0]
+        lse = results[1]
+        philox_seed = results[2]
+        philox_offset = results[3]
 
     return out_bhsd, Q_bhsd, K_bhsd, V_bhsd, lse.float(), philox_seed, philox_offset
+
+
+def _native_efficient_attn_backward(
+    dOut, Q, K, V, bias, out, lse, is_causal, scale, grad_input_mask
+):
+    """Native PyTorch efficient attention backward.
+
+    Replaces aten::_scaled_dot_product_efficient_attention_backward which is
+    not available on CPU (it internally calls the forward aten op for
+    recomputation). All inputs are BHSD: [B, H, S, D]; lse is [B, H, 1, Sq].
+    """
+    need_dq, need_dk, need_dv, need_dbias = grad_input_mask
+    B, H, Sq, D = Q.shape
+    Skv = K.shape[2]
+
+    Q_f = Q.float()
+    K_f = K.float()
+    V_f = V.float()
+    dO_f = dOut.float()
+
+    # Recompute attention scores S = scale * Q @ K^T + bias
+    S = torch.matmul(Q_f, K_f.transpose(-1, -2)) * scale
+    if bias is not None:
+        S = S + bias.float()
+    if is_causal:
+        causal_mask = torch.triu(
+            torch.ones(Sq, Skv, device=Q.device, dtype=torch.bool), diagonal=1
+        )
+        S = S.masked_fill(causal_mask, float("-inf"))
+
+    # P = softmax(S) = exp(S - lse^T)
+    P = torch.exp(S - lse.transpose(-1, -2))
+
+    # dV = P^T @ dOut
+    dV = (
+        torch.matmul(P.transpose(-1, -2), dO_f)
+        if need_dv
+        else torch.zeros_like(V_f)
+    )
+
+    # dP = dOut @ V^T
+    dP = torch.matmul(dO_f, V_f.transpose(-1, -2))
+
+    # Softmax Jacobian: dS = P * (dP - Di)
+    Di = torch.sum(dP * P, dim=-1, keepdim=True)
+    dS = P * (dP - Di)
+
+    # dQ = scale * dS @ K,  dK = scale * dS^T @ Q
+    dQ = scale * torch.matmul(dS, K_f) if need_dq else torch.zeros_like(Q_f)
+    dK = (
+        scale * torch.matmul(dS.transpose(-1, -2), Q_f)
+        if need_dk
+        else torch.zeros_like(K_f)
+    )
+    dBias = dS if (need_dbias and bias is not None) else None
+
+    dQ = dQ.to(Q.dtype)
+    dK = dK.to(K.dtype)
+    dV = dV.to(V.dtype)
+    if dBias is not None:
+        dBias = dBias.to(bias.dtype)
+    return dQ, dK, dV, dBias
 
 
 @pytest.mark.flash_attention_backward
@@ -660,26 +743,45 @@ def test_scaled_dot_product_efficient_attention_backward(
     ref_bias = utils.to_reference(attn_bias)
     ref_out_bhsd = utils.to_reference(out_bhsd)
     ref_lse = utils.to_reference(lse)
-    (
-        ref_dQ_bhsd,
-        ref_dK_bhsd,
-        ref_dV_bhsd,
-        ref_dBias,
-    ) = torch.ops.aten._scaled_dot_product_efficient_attention_backward(
-        ref_dOut_bhsd,
-        ref_Q_bhsd,
-        ref_K_bhsd,
-        ref_V_bhsd,
-        ref_bias,
-        ref_out_bhsd,
-        ref_lse,
-        philox_seed,
-        philox_offset,
-        0.0,
-        grad_input_mask,
-        is_causal,
-        scale=scale,
-    )
+    if flag_gems.vendor_name == "ascend":
+        (
+            ref_dQ_bhsd,
+            ref_dK_bhsd,
+            ref_dV_bhsd,
+            ref_dBias,
+        ) = _native_efficient_attn_backward(
+            ref_dOut_bhsd,
+            ref_Q_bhsd,
+            ref_K_bhsd,
+            ref_V_bhsd,
+            ref_bias,
+            ref_out_bhsd,
+            ref_lse,
+            is_causal,
+            scale,
+            grad_input_mask,
+        )
+    else:
+        (
+            ref_dQ_bhsd,
+            ref_dK_bhsd,
+            ref_dV_bhsd,
+            ref_dBias,
+        ) = torch.ops.aten._scaled_dot_product_efficient_attention_backward(
+            ref_dOut_bhsd,
+            ref_Q_bhsd,
+            ref_K_bhsd,
+            ref_V_bhsd,
+            ref_bias,
+            ref_out_bhsd,
+            ref_lse,
+            philox_seed,
+            philox_offset,
+            0.0,
+            grad_input_mask,
+            is_causal,
+            scale=scale,
+        )
     ref_dQ = ref_dQ_bhsd.permute(0, 2, 1, 3).contiguous()
     ref_dK = ref_dK_bhsd.permute(0, 2, 1, 3).contiguous()
     ref_dV = ref_dV_bhsd.permute(0, 2, 1, 3).contiguous()
