@@ -17,7 +17,9 @@ import logging
 import torch
 import triton
 import triton.language as tl
-import triton.language.extra.cann.libdevice as libdevice
+import flag_gems
+if flag_gems.vendor_name == "ascend":
+    import triton.language.extra.cann.libdevice as libdevice
 
 logger = logging.getLogger(__name__)
 _I16_MIN_LUT_CACHE = {}
