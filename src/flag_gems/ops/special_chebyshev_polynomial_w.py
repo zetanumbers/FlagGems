@@ -50,8 +50,7 @@ def chebyshev_polynomial_w_func(x, n):
     # Compute W_k for k >= 2 using recurrence
     w_km2 = w0
     w_km1 = w1
-    _MAX_POLY_DEGREE = tl.constexpr(101)
-    for k in tl.static_range(2, _MAX_POLY_DEGREE):
+    for k in tl.static_range(2, 101):
         w_k = 2.0 * x_f32 * w_km1 - w_km2
         result = tl.where(n_i32 == k, w_k, result)
         w_km2 = w_km1
