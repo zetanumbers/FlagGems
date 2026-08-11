@@ -84,7 +84,8 @@ def kthvalue(inp, k, dim=-1, keepdim=False):
         inp = inp.permute(perm).contiguous()
 
     # Use topk to get k smallest elements (sorted ascending)
-    values, indices = gems_topk(inp, k, dim=-1, largest=False, sorted=True)
+    values, indices = torch.topk(inp, k, dim=-1, largest=False, sorted=True)
+    # values, indices = gems_topk(inp, k, dim=-1, largest=False, sorted=True)
 
     # Extract the kth element (index k-1 in 0-indexed)
     slice_idx = k - 1
