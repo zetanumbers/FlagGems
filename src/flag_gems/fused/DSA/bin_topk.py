@@ -128,7 +128,7 @@ def kernel_bucket_sort_topk(  # grid(B, BS)
     cond = (s_histogram > l_new_topk) & (
         (s_histogram.gather(mv_idx, 0) <= l_new_topk) | (mv_idx == 0)
     )
-    l_threshold_bin_id = cond.argmax(0)
+    l_threshold_bin_id = cond.to(tl.int32).argmax(0)
 
     l_new_topk -= tl.where(
         tl.arange(0, HISTOGRAM_SIZE) == l_threshold_bin_id + 1, s_histogram, 0
@@ -211,7 +211,7 @@ def kernel_bucket_sort_topk(  # grid(B, BS)
         cond = (s_histogram > l_new_topk) & (
             (s_histogram.gather(mv_idx, 0) <= l_new_topk) | (mv_idx == 0)
         )
-        l_threshold_bin_id = cond.argmax(0)
+        l_threshold_bin_id = cond.to(tl.int32).argmax(0)
         l_new_topk -= tl.where(
             tl.arange(0, HISTOGRAM_SIZE) == l_threshold_bin_id + 1, s_histogram, 0
         ).max(0)
@@ -269,7 +269,7 @@ def bucket_sort_topk_triton(inputs, starts, ends, topk):
     B, S = inputs.shape
     K = topk
     HISTOGRAM_SIZE = 256
-    SMEM_INPUT_SIZE = 4096
+    SMEM_INPUT_SIZE = S
     indices = torch.full((B, topk), -1, dtype=torch.int32, device=inputs.device)
     s_input_idx = torch.zeros(
         B, SMEM_INPUT_SIZE, dtype=torch.int32, device=inputs.device
