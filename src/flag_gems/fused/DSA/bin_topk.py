@@ -39,19 +39,25 @@ TLE_RADIX_FINAL_SEQ_LEN_THRESHOLD = 12288
 
 @triton.jit
 def convert_to_uint16(x):
-    bits_uint = convert_to_uint32(x)
-    return ((bits_uint >> 24) & 0xFF).to(tl.uint16)
+    # Returns top 8 bits as int32 in [0, 255].
+    # Uses int32 throughout because uint16/uint32 are not supported on Ascend NPU.
+    bits_int = convert_to_uint32(x)
+    return (bits_int >> 24) & 0xFF
 
 
 @triton.jit
 def convert_to_uint32(x):
-    bits_uint = x.to(tl.uint32, bitcast=True)
-    bits_uint = tl.where(
+    # Convert float32 to a sortable int32 (monotonically increasing with float value).
+    # Uses int32 instead of uint32 because uint32 is not supported on Ascend NPU.
+    # The & 0xFF mask in convert_to_uint16 handles the arithmetic right shift correctly.
+    bits = x.to(tl.int32, bitcast=True)
+    sign_flip = tl.full(bits.shape, -2147483648, tl.int32)  # 0x80000000 as int32
+    bits = tl.where(
         x < 0,
-        ~bits_uint & tl.full(bits_uint.shape, 0xFFFFFFFF, tl.uint32),
-        bits_uint | tl.full(bits_uint.shape, 0x80000000, tl.uint32),
+        ~bits,  # Flip all bits for negative numbers
+        bits | sign_flip,  # Set sign bit for positive numbers (OR, not XOR, to handle -0.0)
     )
-    return bits_uint
+    return bits
 
 
 @triton.autotune(
@@ -150,14 +156,13 @@ def kernel_bucket_sort_topk(  # grid(B, BS)
         topk_idx = over_thre.to(tl.int32).cumsum(-1)
         thre_bin_idx = eq_thre.to(tl.int32).cumsum(-1)
 
-        concat_mask = tl.cat(over_thre, eq_thre, True)
-        concat_input = tl.cat(input_idx, input_idx, True)
-        concat_pointer_matrix = tl.cat(
-            indices_base + sum + topk_idx - 1,
+        # Use separate stores instead of tl.cat (not supported on Ascend NPU)
+        tl.store(indices_base + sum + topk_idx - 1, input_idx, mask=over_thre)
+        tl.store(
             s_input_ids_base + thre_bin_sum + thre_bin_idx - 1,
-            True,
+            input_idx,
+            mask=eq_thre,
         )
-        tl.store(concat_pointer_matrix, concat_input, mask=concat_mask)
 
         thre_bin_sum += thre_bin_cur_sum
         sum += cur_sum
@@ -232,15 +237,13 @@ def kernel_bucket_sort_topk(  # grid(B, BS)
             topk_idx = over_thre.to(tl.int32).cumsum(-1)
             thre_bin_idx = eq_thre.to(tl.int32).cumsum(-1)
 
-            concat_mask = tl.cat(over_thre, eq_thre, True)
-            concat_input = tl.cat(input_idx, input_idx, True)
-            concat_pointer_matrix = tl.cat(
-                indices_base + sum + topk_idx - 1,
+            # Use separate stores instead of tl.cat (not supported on Ascend NPU)
+            tl.store(indices_base + sum + topk_idx - 1, input_idx, mask=over_thre)
+            tl.store(
                 s_input_ids_base + thre_bin_sum + thre_bin_idx - 1,
-                True,
+                input_idx,
+                mask=eq_thre,
             )
-
-            tl.store(concat_pointer_matrix, concat_input, mask=concat_mask)
 
             thre_bin_sum += thre_bin_cur_sum
             sum += cur_sum

@@ -228,6 +228,10 @@ def apply_softcap(S, softcap, is_softcap: tl.constexpr):
 
 
 def block_m_splitkv_heuristic(headdim):
+    # Ascend NPU: BLOCK_M=128 with headdim>=128 causes UB overflow
+    # (Q:[128,128] f16=32KB + acc_:[128,128] f32=64KB + temporaries exceed UB limit)
+    if _IS_ASCEND and headdim >= 128:
+        return 64
     return 128 if headdim <= 128 else 64
 
 
@@ -244,6 +248,8 @@ def is_even_mn(M, N, BM, BN, WL, WR):
 
 
 def block_m_splitkv_heuristic_spec_args(args):
+    if _IS_ASCEND and args["d"] >= 128:
+        return 64
     return 128 if args["d"] <= 128 else 64
 
 
@@ -978,7 +984,7 @@ def flash_fwd_splitkv_kernel(
                         cache_modifier=".cg",
                         other=0.0,
                     )
-            S = tl.dot(Q, K)
+            S = tl.dot(Q, K, out_dtype=tl.float32)
             S = apply_softcap(S, softcap, is_softcap)
             col_idx = n_block * BLOCK_N + tl.arange(0, BLOCK_N)
             row_idx = m_block * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -1012,7 +1018,7 @@ def flash_fwd_splitkv_kernel(
                         other=0.0,
                     )
             P = P.to(v_ptr.type.element_ty)
-            acc_ = tl.dot(P, V, acc_)
+            acc_ = tl.dot(P, V, acc_, out_dtype=tl.float32)
     else:
         for n_block in tl.range(split_block_min, min(split_block_max, n_block_max)):
             kv_off = n_block * BLOCK_N * k_row_stride
@@ -1045,7 +1051,7 @@ def flash_fwd_splitkv_kernel(
                         other=0.0,
                     )
 
-            S = tl.dot(Q, K)
+            S = tl.dot(Q, K, out_dtype=tl.float32)
             S = apply_softcap(S, softcap, is_softcap)
             S = apply_alibi(
                 S,
@@ -1094,7 +1100,7 @@ def flash_fwd_splitkv_kernel(
                         other=0.0,
                     )
             P = P.to(v_ptr.type.element_ty)
-            acc_ = tl.dot(P, V, acc_)
+            acc_ = tl.dot(P, V, acc_, out_dtype=tl.float32)
 
     # LSE
     lse = tl.where(
