@@ -28,10 +28,7 @@ logger = logging.getLogger(__name__)
 @triton.jit
 def sinc_func(x):
     px = math.pi * x.to(tl.float32)
-    # For near-zero values, sin(px)/px loss precision in float32.
-    # Use 2nd-order Taylor expansion: 1- px^2/6 for |px| < 1e-3.
-    taylor = 1.0 -px * px * 0.16666667
-    return tl.where(tl.abs(px) < 1.0e-3, taylor, tl.sin(px) / px)
+    return tl.where(x == 0.0, 1.0, tl.sin(px) / px)
 
 
 def sinc(A):
