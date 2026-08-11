@@ -207,7 +207,7 @@ def _flash_attn_bwd_dq_fused(
             other=0.0,
         )
 
-        s = tl.dot(q, tl.trans(k)) * sm_scale
+        s = tl.dot(q, tl.trans(k), out_dtype=tl.float32) * sm_scale
 
         if HAS_BIAS:
             bb = batch_idx * stride_bb + head_q_idx * stride_bh
@@ -232,7 +232,7 @@ def _flash_attn_bwd_dq_fused(
 
         s = tl.where(mask_s, s.to(tl.float32), float("-inf"))
         p = tl.exp(s - Li[:, None])
-        dp = tl.dot(do, tl.trans(v)).to(tl.float32)
+        dp = tl.dot(do, tl.trans(v), out_dtype=tl.float32)
 
         if IS_DROPOUT:
             rng_off = (
@@ -248,7 +248,7 @@ def _flash_attn_bwd_dq_fused(
             p = tl.where(drop_mask, p * drop_scale, 0.0)
 
         ds = p * (dp - Di[:, None]) * sm_scale
-        dq = dq + tl.dot(ds.to(q.dtype), k)
+        dq = dq + tl.dot(ds.to(q.dtype), k, out_dtype=tl.float32)
 
         if DO_BIAS_GRAD:
             ds_bias = p * (dp - Di[:, None])
@@ -440,7 +440,7 @@ def _flash_attn_bwd_dkv(
         Li = tl.load(L + ld_base + offs_m_c, mask=mask_m, other=0.0)
         Di = tl.load(D + ld_base + offs_m_c, mask=mask_m, other=0.0)
 
-        s = tl.dot(q, tl.trans(k)) * sm_scale
+        s = tl.dot(q, tl.trans(k), out_dtype=tl.float32) * sm_scale
 
         if HAS_BIAS:
             bb = batch_idx * stride_bb + head_q_idx * stride_bh
@@ -466,7 +466,7 @@ def _flash_attn_bwd_dkv(
 
         s = tl.where(mask_s, s.to(tl.float32), float("-inf"))
         p = tl.exp(s - Li[:, None])
-        dp = tl.dot(do, tl.trans(v)).to(tl.float32)
+        dp = tl.dot(do, tl.trans(v), out_dtype=tl.float32)
 
         if IS_DROPOUT:
             rng_off = (
@@ -482,8 +482,8 @@ def _flash_attn_bwd_dkv(
             p = tl.where(drop_mask, p * drop_scale, 0.0)
 
         ds = p * (dp - Di[:, None]) * sm_scale
-        dk = dk + tl.dot(tl.trans(ds.to(q.dtype)), q)
-        dv = dv + tl.dot(tl.trans(p.to(q.dtype)), do)
+        dk = dk + tl.dot(tl.trans(ds.to(q.dtype)), q, out_dtype=tl.float32)
+        dv = dv + tl.dot(tl.trans(p.to(q.dtype)), do, out_dtype=tl.float32)
 
     tl.store(
         dK + k_base + offs_n[:, None] * stride_km + offs_d[None, :] * stride_kd,
@@ -644,7 +644,7 @@ def _flash_attn_bwd_varlen_dq_fused(
             other=0.0,
         )
 
-        s = tl.dot(q, tl.trans(k)) * sm_scale
+        s = tl.dot(q, tl.trans(k), out_dtype=tl.float32) * sm_scale
 
         if HAS_BIAS:
             bias_block = tl.load(
@@ -668,7 +668,7 @@ def _flash_attn_bwd_varlen_dq_fused(
 
         s = tl.where(mask_s, s.to(tl.float32), float("-inf"))
         p = tl.exp(s - Li[:, None])
-        dp = tl.dot(do, tl.trans(v)).to(tl.float32)
+        dp = tl.dot(do, tl.trans(v), out_dtype=tl.float32)
 
         if IS_DROPOUT:
             rng_off = (
@@ -684,7 +684,7 @@ def _flash_attn_bwd_varlen_dq_fused(
             p = tl.where(drop_mask, p * drop_scale, 0.0)
 
         ds = p * (dp - Di[:, None]) * sm_scale
-        dq = dq + tl.dot(ds.to(q.dtype), k)
+        dq = dq + tl.dot(ds.to(q.dtype), k, out_dtype=tl.float32)
 
         if DO_BIAS_GRAD:
             ds_bias = p * (dp - Di[:, None])
@@ -902,7 +902,7 @@ def _flash_attn_bwd_varlen_dkv(
         Di = tl.load(D + m_phys * H_q + head_q_idx, mask=mask_m, other=0.0)
         Li = tl.load(L + m_phys * H_q + head_q_idx, mask=mask_m, other=0.0)
 
-        s = tl.dot(q, tl.trans(k)) * sm_scale
+        s = tl.dot(q, tl.trans(k), out_dtype=tl.float32) * sm_scale
 
         if HAS_BIAS:
             bias_block = tl.load(
@@ -927,7 +927,7 @@ def _flash_attn_bwd_varlen_dkv(
 
         s = tl.where(mask_s, s.to(tl.float32), float("-inf"))
         p = tl.exp(s - Li[:, None])
-        dp = tl.dot(do, tl.trans(v)).to(tl.float32)
+        dp = tl.dot(do, tl.trans(v), out_dtype=tl.float32)
 
         if IS_DROPOUT:
             rng_off = (
@@ -943,8 +943,8 @@ def _flash_attn_bwd_varlen_dkv(
             p = tl.where(drop_mask, p * drop_scale, 0.0)
 
         ds = p * (dp - Di[:, None]) * sm_scale
-        dk = dk + tl.dot(tl.trans(ds.to(q.dtype)), q)
-        dv = dv + tl.dot(tl.trans(p.to(q.dtype)), do)
+        dk = dk + tl.dot(tl.trans(ds.to(q.dtype)), q, out_dtype=tl.float32)
+        dv = dv + tl.dot(tl.trans(p.to(q.dtype)), do, out_dtype=tl.float32)
 
     tl.store(
         dK
@@ -1519,6 +1519,10 @@ def scaled_dot_product_efficient_attention_backward(
 ):
     logger.debug("GEMS SCALED_DOT_PRODUCT_EFFICIENT_ATTENTION_BACKWARD")
     need_dq, need_dk, need_dv, need_dbias = grad_input_mask
+
+    # SDPA returns lse as [B, H, 1, S]; flash_attn_backward expects [B, H, S]
+    if logsumexp.dim() == 4:
+        logsumexp = logsumexp.squeeze(-2)
 
     grad_out_bshd = grad_out_.permute(0, 2, 1, 3).contiguous()
     query_bshd = query.permute(0, 2, 1, 3).contiguous()
