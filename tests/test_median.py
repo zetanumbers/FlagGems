@@ -776,8 +776,8 @@ def test_median_lastdim_sort_unique_exact_index(dtype, width):
 def test_median_lastdim_sort_1536_unique_exact_index(dtype, keepdim):
     width = 1536
     rank = (width - 1) // 2
-    first = torch.arange(width, dtype=dtype, device=flag_gems.device)
-    second = torch.arange(width, dtype=dtype, device=flag_gems.device).roll(13)
+    first = torch.arange(width, dtype=dtype, device="cpu").to(flag_gems.device)
+    second = torch.arange(width, dtype=dtype, device="cpu").to(flag_gems.device).roll(7)
     inp = torch.stack((first, second))
     expected_indices = torch.tensor(
         [rank, (rank + 13) % width], device=flag_gems.device
@@ -1348,8 +1348,8 @@ def test_median_int_lastdim_select_boundaries(dtype, width):
 @pytest.mark.parametrize("width", [65, 1536])
 def test_median_int_lastdim_select_unique_exact_index(dtype, width):
     rank = (width - 1) // 2
-    first = torch.arange(width, dtype=dtype, device=flag_gems.device)
-    second = torch.arange(width, dtype=dtype, device=flag_gems.device).roll(7)
+    first = torch.arange(width, dtype=dtype, device="cpu").to(flag_gems.device)
+    second = torch.arange(width, dtype=dtype, device="cpu").to(flag_gems.device).roll(7)
     inp = torch.stack((first, second))
     expected_indices = torch.tensor([rank, (rank + 7) % width], device=flag_gems.device)
     ref_inp = utils.to_reference(inp)
