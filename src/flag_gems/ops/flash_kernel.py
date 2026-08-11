@@ -228,10 +228,14 @@ def apply_softcap(S, softcap, is_softcap: tl.constexpr):
 
 
 def block_m_splitkv_heuristic(headdim):
-    # Ascend NPU: BLOCK_M=128 with headdim>=128 causes UB overflow
-    # (Q:[128,128] f16=32KB + acc_:[128,128] f32=64KB + temporaries exceed UB limit)
-    if _IS_ASCEND and headdim >= 128:
-        return 64
+    # Ascend NPU: reduce BLOCK_M to avoid UB overflow
+    # headdim>=192: BLOCK_K=256, Q:[BM,256] f16 + acc_:[BM,256] f32 dominate UB
+    # headdim>=128: BLOCK_K=128, still need BM<=64 to fit UB
+    if _IS_ASCEND:
+        if headdim >= 192:
+            return 32
+        if headdim >= 128:
+            return 64
     return 128 if headdim <= 128 else 64
 
 
@@ -248,8 +252,11 @@ def is_even_mn(M, N, BM, BN, WL, WR):
 
 
 def block_m_splitkv_heuristic_spec_args(args):
-    if _IS_ASCEND and args["d"] >= 128:
-        return 64
+    if _IS_ASCEND:
+        if args["d"] >= 192:
+            return 32
+        if args["d"] >= 128:
+            return 64
     return 128 if args["d"] <= 128 else 64
 
 
