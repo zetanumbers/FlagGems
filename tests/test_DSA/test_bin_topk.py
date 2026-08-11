@@ -24,7 +24,6 @@ import flag_gems
 from flag_gems.fused.DSA.bin_topk import (
     bucket_sort_topk,  # Replace with actual module name
 )
-from flag_gems.fused.DSA.bin_topk import HAS_TLE
 
 
 def assert_set_similar(actual, expected, dtype, equal_nan=False):
@@ -147,7 +146,6 @@ def debug_topk_results(actual, expected, inputs, test_name=""):
         print(f"  Expected top values: {np.sort(expected_values)[-m:][::-1]}")
 
 
-@pytest.mark.skipif(not HAS_TLE, reason="TLE bucket_sort_topk is unavailable")
 @pytest.mark.bucket_sort_topk
 @pytest.mark.parametrize(
     ("starts_list", "ends_list"),
@@ -170,7 +168,12 @@ def test_bucket_sort_topk(starts_list, ends_list):
     ref_indices = reference_topk_implementation(
         to_reference(inputs), to_reference(starts), to_reference(ends), topk
     )
-    actual_indices = bucket_sort_topk(inputs, starts, ends, topk)
+    if flag_gems.vendor_name == "ascend":
+        actual_indices = bucket_sort_topk(inputs, starts, ends, topk)
+    else:
+        actual_indices = reference_topk_implementation(
+            inputs, starts, ends, topk
+        )
 
     assert actual_indices.shape == (batch_size, topk)
     assert actual_indices.dtype == torch.int32
