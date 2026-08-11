@@ -23,7 +23,6 @@ from flag_gems.runtime import torch_device_fn
 from flag_gems.runtime.backend._ascend import heuristics_config_utils as _hcu
 from flag_gems.utils import libentry, libtuner
 
-from src.flag_gems.ops.scaled_mm import GROUP_M
 
 logger = logging.getLogger(__name__)
 
