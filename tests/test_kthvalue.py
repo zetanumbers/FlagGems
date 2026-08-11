@@ -23,6 +23,19 @@ from . import accuracy_utils as utils
 KTHVALUE_K_VALUES = [1, 2, 4]
 
 
+def _assert_indices_tie_aware(res_indices, ref_indices, ref_inp, dim, keepdim):
+    """Assert index correctness, allowing different indices for tied values."""
+    res_indices = utils.to_cpu(res_indices, ref_indices)
+    if torch.equal(res_indices, ref_indices):
+        return
+    if not keepdim:
+        res_indices = res_indices.unsqueeze(dim)
+        ref_indices = ref_indices.unsqueeze(dim)
+    gathered_res = torch.gather(ref_inp, dim, res_indices.to(torch.int64))
+    gathered_ref = torch.gather(ref_inp, dim, ref_indices.to(torch.int64))
+    torch.testing.assert_close(gathered_res, gathered_ref, atol=0, rtol=0)
+
+
 @pytest.mark.kthvalue
 @pytest.mark.parametrize("shape", utils.REDUCTION_SHAPES)
 @pytest.mark.parametrize("k", KTHVALUE_K_VALUES)
@@ -49,7 +62,7 @@ def test_kthvalue(shape, k, dim, keepdim, dtype):
         res_values, res_indices = torch.kthvalue(inp, k, dim=dim, keepdim=keepdim)
 
     utils.gems_assert_close(res_values, ref_values, dtype)
-    utils.gems_assert_equal(res_indices, ref_indices)
+    _assert_indices_tie_aware(res_indices, ref_indices, ref_inp, dim, keepdim)
 
 
 @pytest.mark.kthvalue
@@ -76,7 +89,7 @@ def test_kthvalue_default_dim(shape, k, dtype):
         res_values, res_indices = torch.kthvalue(inp, k)
 
     utils.gems_assert_close(res_values, ref_values, dtype)
-    utils.gems_assert_equal(res_indices, ref_indices)
+    _assert_indices_tie_aware(res_indices, ref_indices, ref_inp, -1, False)
 
 
 @pytest.mark.kthvalue
