@@ -203,6 +203,9 @@ def special_logsumexp(inp, dim, keepdim=False):
         for i in range(dim):
             M *= inp.shape[i]
         inp = inp.contiguous()
+        orig_dtype = inp.dtype
+        if orig_dtype in (torch.float16, torch.bfloat16):
+            inp = inp.to(torch.float32)
         dtype = inp.dtype
         # Compute output shape (reduced along dim)
         if keepdim:
@@ -230,6 +233,8 @@ def special_logsumexp(inp, dim, keepdim=False):
                     M,
                     N,
                 )
+        if orig_dtype in (torch.float16, torch.bfloat16):
+            out = out.to(orig_dtype)
         return out
 
     # Multiple dimensions - reduce sequentially by recursing into the
