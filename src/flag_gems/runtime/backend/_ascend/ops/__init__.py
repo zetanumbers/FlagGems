@@ -51,7 +51,13 @@ from .full import full
 from .full_like import full_like
 from .gather import gather, gather_backward
 from .groupnorm import group_norm, group_norm_backward
-from .hadamard_transform import hadamard_transform
+from .hadamard_transform import (
+    hadamard_transform,
+    hadamard_transform_12N,
+    hadamard_transform_20N,
+    hadamard_transform_28N,
+    hadamard_transform_40N,
+)
 from .hstack import hstack
 from .index import index
 from .index_add import index_add, index_add_
@@ -155,6 +161,10 @@ __all__ = [
     "group_norm",
     "group_norm_backward",
     "hadamard_transform",
+    "hadamard_transform_12N",
+    "hadamard_transform_20N",
+    "hadamard_transform_28N",
+    "hadamard_transform_40N",
     "hstack",
     "index",
     "index_add",

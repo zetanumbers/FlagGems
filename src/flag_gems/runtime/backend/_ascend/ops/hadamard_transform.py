@@ -309,3 +309,76 @@ def hadamard_transform(x, scale=1.0):
     the next power of 2.
     """
     return HadamardTransformFn.apply(x, scale)
+
+
+# ============================================================
+# MN variants (non-power-of-2 dims)
+#
+# Decomposes dim = M * 2^k via H_M ⊗ H_{2^k}:
+#   1. Reshape to (batch, M, 2^k)
+#   2. Apply H_M column transform in fp32 (PyTorch native ops)
+#   3. Apply standard FHT on each row via _hadamard_transform_fwd
+#      (uses DRAM scratch buffers — no UB overflow)
+# ============================================================
+
+
+def _launch_mn_2kernel(x: torch.Tensor, M: int, scale: float) -> torch.Tensor:
+    """2-kernel approach: H_M column transform + standard FHT."""
+    *leading, dim = x.shape
+    batch = x.numel() // dim
+    n_cols = dim // M
+    dtype = x.dtype
+    xm = x.reshape(batch, M, n_cols).contiguous()
+
+    xm_f32 = xm.to(torch.float32)
+    if M == 3:
+        a, b, c = xm_f32[:, 0], xm_f32[:, 1], xm_f32[:, 2]
+        rows = [a + b + c, a - b + c, a + b - c]
+    elif M == 5:
+        a, b, c, d, e = (xm_f32[:, i] for i in range(5))
+        rows = [
+            a + b + c + d + e,
+            a - b + c - d + e,
+            a + b - c + d - e,
+            a - b - c - d - e,
+            a + b + c - d - e,
+        ]
+    elif M == 7:
+        a, b, c, d, e, f, g = (xm_f32[:, i] for i in range(7))
+        rows = [
+            a + b + c + d + e + f + g,
+            a - b + c - d + e - f + g,
+            a + b - c + d - e + f - g,
+            a - b - c - d - e - f - g,
+            a + b + c - d - e - f - g,
+            a - b + c + d - e + f + g,
+            a + b - c - d + e + f - g,
+        ]
+    else:
+        raise ValueError(f"Unsupported M={M}")
+
+    ym = torch.stack(rows, dim=1).reshape(batch * M, n_cols)
+
+    out_fht = _hadamard_transform_fwd(ym, scale)
+    out = out_fht.reshape(batch, M, n_cols).to(dtype)
+    return out.reshape(*leading, dim)
+
+
+def hadamard_transform_12N(x, scale=1.0):
+    """Hadamard transform for dim = 3 * 2^k (e.g. 1536, 3072, 6144, 12288)."""
+    return _launch_mn_2kernel(x, M=3, scale=scale)
+
+
+def hadamard_transform_20N(x, scale=1.0):
+    """Hadamard transform for dim = 5 * 2^k (e.g. 5120, 10240, 20480)."""
+    return _launch_mn_2kernel(x, M=5, scale=scale)
+
+
+def hadamard_transform_28N(x, scale=1.0):
+    """Hadamard transform for dim = 7 * 2^k (e.g. 7168, 14336, 28672)."""
+    return _launch_mn_2kernel(x, M=7, scale=scale)
+
+
+def hadamard_transform_40N(x, scale=1.0):
+    """Hadamard transform for dim = 5 * 2^k (e.g. 10240, 20480, 40960)."""
+    return _launch_mn_2kernel(x, M=5, scale=scale)
