@@ -23,8 +23,8 @@ NUM_HEADS = 8
 MAX_POS = 4096
 MXFP4_BLOCK_SIZE = 32
 
-HAS_NATIVE_FP8 = hasattr(torch, "float8_e4m3fn") and (
-    flag_gems.SUPPORTED_FP8_DTYPE == torch.float8_e4m3fn
+HAS_NATIVE_FP8 = flag_gems.vendor_name == "ascend" or (
+    hasattr(torch, "float8_e4m3fn") and flag_gems.SUPPORTED_FP8_DTYPE == torch.float8_e4m3fn
 )
 
 
