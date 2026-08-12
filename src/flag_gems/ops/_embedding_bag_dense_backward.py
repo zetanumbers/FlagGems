@@ -205,6 +205,4 @@ def _embedding_bag_dense_backward(
         EMBED_DIM=D,
     )
 
-    if grad.dtype != torch.float32:
-        return grad_weight.to(grad.dtype)
     return grad_weight

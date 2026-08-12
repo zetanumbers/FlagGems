@@ -79,7 +79,7 @@ def test_embedding_bag_dense_backward(num_bags, embedding_dim, dtype):
 
     ref_out = utils.to_reference(
         torch.ops.aten._embedding_bag_dense_backward(
-            grad,
+            grad.float(),
             indices,
             offset2bag,
             bag_size,
@@ -105,7 +105,7 @@ def test_embedding_bag_dense_backward(num_bags, embedding_dim, dtype):
             -1,
         )
 
-    utils.gems_assert_close(res_out, ref_out, dtype)
+    utils.gems_assert_close(res_out, ref_out, torch.float32)
 
 
 @pytest.mark.embedding_bag_dense_backward
@@ -168,7 +168,7 @@ def test_embedding_bag_dense_backward_with_weights(num_bags, embedding_dim, dtyp
 
     ref_out = utils.to_reference(
         torch.ops.aten._embedding_bag_dense_backward(
-            grad,
+            grad.float(),
             indices,
             offset2bag,
             bag_size,
@@ -176,7 +176,7 @@ def test_embedding_bag_dense_backward_with_weights(num_bags, embedding_dim, dtyp
             num_weights,
             False,
             0,
-            per_sample_weights,
+            per_sample_weights.float(),
             -1,
         )
     )
@@ -194,7 +194,7 @@ def test_embedding_bag_dense_backward_with_weights(num_bags, embedding_dim, dtyp
             -1,
         )
 
-    utils.gems_assert_close(res_out, ref_out, dtype)
+    utils.gems_assert_close(res_out, ref_out, torch.float32)
 
 
 @pytest.mark.embedding_bag_dense_backward
@@ -256,7 +256,7 @@ def test_embedding_bag_dense_backward_mode_sum(num_bags, embedding_dim, dtype):
 
     ref_out = utils.to_reference(
         torch.ops.aten._embedding_bag_dense_backward(
-            grad,
+            grad.float(),
             indices,
             offset2bag,
             bag_size,
@@ -282,4 +282,4 @@ def test_embedding_bag_dense_backward_mode_sum(num_bags, embedding_dim, dtype):
             -1,
         )
 
-    utils.gems_assert_close(res_out, ref_out, dtype)
+    utils.gems_assert_close(res_out, ref_out, torch.float32)
