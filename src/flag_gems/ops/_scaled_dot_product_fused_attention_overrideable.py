@@ -17,8 +17,6 @@ import logging
 
 import torch
 
-from flag_gems.ops.attention import scaled_dot_product_attention_forward
-
 logger = logging.getLogger(__name__)
 
 
@@ -56,6 +54,8 @@ def _scaled_dot_product_fused_attention_overrideable(
     # Currently only supports dropout_p=0.0
     assert dropout_p == 0.0, "Only dropout_p=0.0 is supported"
 
+    # Delayed import to pick up the backend-registered implementation
+    from flag_gems import scaled_dot_product_attention_forward
     # Call the underlying scaled_dot_product_attention implementation
     output, logsumexp = scaled_dot_product_attention_forward(
         query,
