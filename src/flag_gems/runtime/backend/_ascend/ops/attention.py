@@ -1160,6 +1160,24 @@ def flash_attention_forward(
     else:
         non_null_window_right = -1
 
+    # Ascend-specific SWA normalization for non-square sequences.
+    # The shared mha_fwd disables a window side when it >= seqlen_k, but for
+    # non-square Q/K sequences the right window must be compared against
+    # seqlen_q (worst case is the first query row).  Disable SWA only when
+    # BOTH windows cover the entire attention matrix; otherwise keep SWA
+    # active so the kernel applies the sliding-window mask correctly.
+    seqlen_q = query.shape[1]
+    seqlen_k = key.shape[1]
+    skip_swa_disable = False
+    if non_null_window_left >= 0 or non_null_window_right >= 0:
+        left_full = non_null_window_left >= seqlen_k
+        right_full = non_null_window_right >= seqlen_q
+        if left_full and right_full:
+            non_null_window_left = -1
+            non_null_window_right = -1
+        else:
+            skip_swa_disable = True
+
     out = torch.empty_like(query)
     if cumulative_sequence_length_q is not None:
         out, q, k, v, lse, philox_seed, philox_offset, p = mha_varlan_fwd(
@@ -1200,6 +1218,7 @@ def flash_attention_forward(
             softcap,
             return_debug_mask,
             disable_splitkv=disable_splitkv,
+            skip_swa_disable=skip_swa_disable,
         )
 
     if HEAD_DIM_K != original_head_dim:
