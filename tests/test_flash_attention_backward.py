@@ -127,7 +127,9 @@ def _native_attn_backward(
     P = torch.exp(S - lse)
 
     dV = (
-        torch.matmul(P.transpose(-1, -2), dO_f)
+        torch.matmul(
+            P.to(dOut.dtype).transpose(-1, -2), dOut
+        )
         if need_dv
         else torch.zeros_like(V_f)
     )
