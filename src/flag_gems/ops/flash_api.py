@@ -990,10 +990,11 @@ def mha_fwd(
     assert (
         num_heads % num_heads_k == 0
     ), "Number of heads in key/value must divide number of heads in query"
-    if window_size_left >= seqlen_k:
-        window_size_left = -1
-    if window_size_right >= seqlen_k:
-        window_size_right = -1
+    if not skip_swa_disable:
+        if window_size_left >= seqlen_k:
+            window_size_left = -1
+        if window_size_right >= seqlen_k:
+            window_size_right = -1
     if seqlen_q == 1 and alibi_slopes is None:
         is_causal = False
     if is_causal:
