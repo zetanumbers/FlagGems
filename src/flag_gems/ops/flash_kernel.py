@@ -304,6 +304,7 @@ def keep(cfg, must_keep=None):
 # Ascend NPU: the yaml attention configs use BLOCK_N=64 which doesn't pass the
 # keep filter ((128,32,4),(128,128,8)). Add BLOCK_N=32 configs with num_stages=1
 # (UB-safe) so flash_fwd_kernel has valid configs on Ascend.
+# BLOCK_M=32 is needed for HEAD_DIM=192 + softcap where BLOCK_M=64 overflows UB.
 _ASCEND_FWD_CONFIGS = (
     [
         triton.Config(
@@ -311,7 +312,7 @@ _ASCEND_FWD_CONFIGS = (
             num_stages=1,
             num_warps=4,
         )
-        for BM in [64, 128]
+        for BM in [32, 64, 128]
     ]
     if _IS_ASCEND
     else []
@@ -325,6 +326,7 @@ if _IS_ASCEND:
 
 def prune_fwd_configs(configs, nargs, **kwargs):
     is_dropout = nargs["is_dropout"]
+    is_softcap = nargs["is_softcap"]
     seqlen_q = nargs["seqlen_q"]
     seqlen_k = nargs["seqlen_k"]
     window_size_left = nargs["window_size_left"]
@@ -337,6 +339,11 @@ def prune_fwd_configs(configs, nargs, **kwargs):
             continue
         # On Ascend, filter BLOCK_M=128 when HEAD_DIM > 128 to avoid UB overflow.
         if _IS_ASCEND and d > 128 and cfg.kwargs["BLOCK_M"] == 128:
+            continue
+        # On Ascend, BLOCK_M=64 with HEAD_DIM=192 + softcap overflows UB
+        # (softcap clamp code adds extra temporary buffers). Fall back to
+        # BLOCK_M=32 which fits within the 2031616-bit UB limit.
+        if _IS_ASCEND and d > 128 and is_softcap and cfg.kwargs["BLOCK_M"] == 64:
             continue
         # Inject IS_EVEN_MN from config's BLOCK_M/BLOCK_N.
         # On NPU (triton-ascend), @triton.heuristics runs before autotune
@@ -355,6 +362,25 @@ def flash_fwd_kernel_heur_block_k(args):
     return triton.next_power_of_2(args["d"])
 
 
+# On Ascend, extend the autotune key with additional parameters that affect
+# config validity or IS_EVEN_MN correctness:
+#   - seqlen_q / seqlen_k: prune_fwd_configs injects IS_EVEN_MN into config
+#     kwargs based on these values.  Without them in the key, the cache reuses
+#     a stale IS_EVEN_MN from the first call, causing incorrect boundary-check
+#     elision for subsequent calls with different sequence lengths.
+#   - is_softcap / softcap: configs that compile without softcap (or with one
+#     softcap value) may exceed UB limits when the softcap clamp code path is
+#     active (or with a different value).  Separating the key ensures each
+#     path gets independently tuned, compilable configs.
+#   - is_causal: causal masking adds extra code that can push certain configs
+#     over UB limits.  Separate tuning per causal mode avoids this.
+_fwd_autotune_key = (
+    ["d", "is_dropout", "seqlen_q", "seqlen_k", "is_softcap", "softcap", "is_causal"]
+    if _IS_ASCEND
+    else ["d", "is_dropout"]
+)
+
+
 @libentry()
 @triton.autotune(
     configs=list(
@@ -364,7 +390,7 @@ def flash_fwd_kernel_heur_block_k(args):
         )
     ),
     prune_configs_by={"early_config_prune": prune_fwd_configs},
-    key=["d", "is_dropout"],
+    key=_fwd_autotune_key,
 )
 @triton.heuristics(
     values={
