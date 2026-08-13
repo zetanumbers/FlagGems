@@ -24,14 +24,14 @@ from . import conftest as cfg
 device = flag_gems.device
 
 if cfg.QUICK_MODE:
-    NUM_TOKENS_LIST = [1, 33]
+    NUM_TOKENS_LIST = [1, 10, 33]
     NUM_EXPERTS_LIST = [128, 256]
     TOPK_LIST = [6, 8]
     DTYPE_LIST = [torch.bfloat16, torch.float32]
     RENORMALIZE_LIST = [True]
     RSF_LIST = [1.0]
 else:
-    NUM_TOKENS_LIST = [1, 33, 128]
+    NUM_TOKENS_LIST = [1, 10, 33, 128]
     NUM_EXPERTS_LIST = [128, 256, 384, 512]
     TOPK_LIST = [6, 8, 16]
     DTYPE_LIST = [torch.bfloat16, torch.float16, torch.float32]
@@ -103,7 +103,7 @@ def _check_topk_results(
 
 
 @pytest.mark.topk_softplus_sqrt
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+@pytest.mark.skipif(flag_gems.vendor_name != "ascend" and flag_gems.vendor_name != "cuda", reason="CUDA or NPU is required")
 @pytest.mark.parametrize("num_tokens", NUM_TOKENS_LIST)
 @pytest.mark.parametrize("num_experts", NUM_EXPERTS_LIST)
 @pytest.mark.parametrize("topk", TOPK_LIST)
@@ -148,7 +148,7 @@ def test_topk_softplus_sqrt(
 
 
 @pytest.mark.topk_softplus_sqrt
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+@pytest.mark.skipif(flag_gems.vendor_name != "ascend" and flag_gems.vendor_name != "cuda", reason="CUDA or NPU is required")
 @pytest.mark.parametrize("num_tokens", HASH_NUM_TOKENS_LIST)
 @pytest.mark.parametrize("num_experts", HASH_NUM_EXPERTS_LIST)
 @pytest.mark.parametrize("topk", HASH_TOPK_LIST)
@@ -201,7 +201,7 @@ def test_topk_softplus_sqrt_hash(
 
 
 @pytest.mark.topk_softplus_sqrt
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+@pytest.mark.skipif(flag_gems.vendor_name != "ascend" and flag_gems.vendor_name != "cuda", reason="CUDA or NPU is required")
 @pytest.mark.skipif(not HAS_VLLM, reason="vLLM is not installed")
 @pytest.mark.parametrize("num_tokens", [1, 10, 128])
 @pytest.mark.parametrize("num_experts", [256])
