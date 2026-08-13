@@ -23,6 +23,8 @@ import flag_gems
 from . import accuracy_utils as utils
 
 
+IS_ASCEND = flag_gems.vendor_name == "ascend"
+
 # div.Tensor with true_divide
 @pytest.mark.div_tensor
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
@@ -80,6 +82,7 @@ DIV_MODE_FLOAT_CASES = (
 @pytest.mark.div_tensor_mode
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("rounding_mode,dtype", DIV_MODE_FLOAT_CASES)
+@pytest.mark.skipif(IS_ASCEND, reason="Currently, Ascend does not support the high-precision version.")
 def test_div_tensor_mode_float(shape, rounding_mode, dtype):
     inp1 = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     inp2 = _make_nonzero_float_tensor(shape, dtype)
@@ -116,6 +119,7 @@ def test_div_tensor_mode_int(shape, rounding_mode, dtype):
 @pytest.mark.div_tensor_mode_
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("rounding_mode,dtype", DIV_MODE_FLOAT_CASES)
+@pytest.mark.skipif(IS_ASCEND, reason="Currently, Ascend does not support the high-precision version.")
 def test_div_tensor_mode_float_(shape, rounding_mode, dtype):
     inp1 = torch.randn(shape, dtype=dtype, device=flag_gems.device)
     inp2 = _make_nonzero_float_tensor(shape, dtype)
@@ -502,6 +506,7 @@ ROUNDING_MODES = ["trunc", "floor"]
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("rounding_mode", ROUNDING_MODES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
+@pytest.mark.skipif(IS_ASCEND, reason="Currently, Ascend does not support the high-precision version.")
 def test_div_mode_tensor(shape, rounding_mode, dtype):
     # div.Tensor_mode: div_mode(Tensor, Tensor, rounding_mode=...)
     if rounding_mode == "trunc" and dtype in (torch.float16, torch.bfloat16):
@@ -528,6 +533,7 @@ def test_div_mode_tensor(shape, rounding_mode, dtype):
 @pytest.mark.parametrize("scalar", utils.SCALARS)
 @pytest.mark.parametrize("rounding_mode", ROUNDING_MODES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
+@pytest.mark.skipif(IS_ASCEND, reason="Currently, Ascend does not support the high-precision version.")
 def test_div_mode_scalar(shape, scalar, rounding_mode, dtype):
     # div.Scalar_mode: div_mode(Tensor, scalar, rounding_mode=...)
     if rounding_mode == "trunc" and dtype in (torch.float16, torch.bfloat16):
@@ -559,6 +565,7 @@ def test_div_mode_scalar(shape, scalar, rounding_mode, dtype):
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("rounding_mode", ROUNDING_MODES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
+@pytest.mark.skipif(IS_ASCEND, reason="Currently, Ascend does not support the high-precision version.")
 def test_div_mode_tensor_(shape, rounding_mode, dtype):
     # div_.Tensor_mode: div_mode_(Tensor, Tensor, rounding_mode=...)
     if rounding_mode == "trunc" and dtype in (torch.float16, torch.bfloat16):
@@ -584,6 +591,7 @@ def test_div_mode_tensor_(shape, rounding_mode, dtype):
 @pytest.mark.parametrize("scalar", utils.SCALARS)
 @pytest.mark.parametrize("rounding_mode", ROUNDING_MODES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
+@pytest.mark.skipif(IS_ASCEND, reason="Currently, Ascend does not support the high-precision version.")
 def test_div_mode_scalar_(shape, scalar, rounding_mode, dtype):
     # div_.Scalar_mode: div_mode_(Tensor, scalar, rounding_mode=...)
     if rounding_mode == "trunc" and dtype in (torch.float16, torch.bfloat16):
