@@ -960,6 +960,7 @@ def mha_fwd(
     softcap,
     return_softmax,
     disable_splitkv=False,
+    skip_swa_disable=False,
 ):
     CHECK_DEVICE(q), CHECK_DEVICE(k), CHECK_DEVICE(v)
     q_dtype = q.dtype

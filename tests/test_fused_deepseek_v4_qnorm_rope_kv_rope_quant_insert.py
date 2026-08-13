@@ -21,6 +21,8 @@ from flag_gems.utils.device_info import get_device_capability
 from .conftest import QUICK_MODE
 
 
+IS_ASCEND = flag_gems.vendor_name == "ascend"
+
 def is_support_fp8e4nv():
     major, minor = get_device_capability()
     return major * 10 + minor >= 89
@@ -267,7 +269,7 @@ def fused_impl(q, kv, k_cache, slot_mapping, positions, cos_sin_cache, eps, bs):
 
 @pytest.mark.fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert
 @pytest.mark.skipif(
-    not is_support_fp8e4nv(), reason="Do not support fp8e4nv when capability < 89"
+    not is_support_fp8e4nv() and not IS_ASCEND, reason="Do not support fp8e4nv when capability < 89"
 )
 @pytest.mark.parametrize("num_tokens", [1, 4, 17, 64])
 @pytest.mark.parametrize("n_heads", [8, 64])
@@ -327,7 +329,7 @@ def _ue8m0_per_block_scales(kv_roped_nope_f32: torch.Tensor, qblock: int):
 
 @pytest.mark.fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert
 @pytest.mark.skipif(
-    not is_support_fp8e4nv(), reason="Do not support fp8e4nv when capability < 89"
+    not is_support_fp8e4nv() and not IS_ASCEND, reason="Do not support fp8e4nv when capability < 89"
 )
 @pytest.mark.parametrize("num_tokens", [1, 4, 17, 64])
 @pytest.mark.parametrize("block_size", [16, 64])
@@ -375,7 +377,7 @@ def test_kv_path_matches_reference(num_tokens: int, block_size: int):
 
 @pytest.mark.fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert
 @pytest.mark.skipif(
-    not is_support_fp8e4nv(), reason="Do not support fp8e4nv when capability < 89"
+    not is_support_fp8e4nv() and not IS_ASCEND, reason="Do not support fp8e4nv when capability < 89"
 )
 @pytest.mark.parametrize("num_tokens", [4, 17])
 @pytest.mark.parametrize("pad", [1, 5])
@@ -427,7 +429,7 @@ def test_kv_path_with_dp_padding(num_tokens: int, pad: int, block_size: int):
 
 @pytest.mark.fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert
 @pytest.mark.skipif(
-    not is_support_fp8e4nv(), reason="Do not support fp8e4nv when capability < 89"
+    not is_support_fp8e4nv() and not IS_ASCEND, reason="Do not support fp8e4nv when capability < 89"
 )
 @pytest.mark.parametrize(
     "num_tokens",
