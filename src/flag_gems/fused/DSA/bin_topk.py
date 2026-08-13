@@ -128,7 +128,7 @@ def kernel_bucket_sort_topk(  # grid(B, BS)
     cond = (s_histogram > l_new_topk) & (
         (s_histogram.gather(mv_idx, 0) <= l_new_topk) | (mv_idx == 0)
     )
-    l_threshold_bin_id = cond.to(tl.int32).argmax(0)
+    l_threshold_bin_id = cond.argmax(0)
 
     l_new_topk -= tl.where(
         tl.arange(0, HISTOGRAM_SIZE) == l_threshold_bin_id + 1, s_histogram, 0
@@ -211,7 +211,7 @@ def kernel_bucket_sort_topk(  # grid(B, BS)
         cond = (s_histogram > l_new_topk) & (
             (s_histogram.gather(mv_idx, 0) <= l_new_topk) | (mv_idx == 0)
         )
-        l_threshold_bin_id = cond.to(tl.int32).argmax(0)
+        l_threshold_bin_id = cond.argmax(0)
         l_new_topk -= tl.where(
             tl.arange(0, HISTOGRAM_SIZE) == l_threshold_bin_id + 1, s_histogram, 0
         ).max(0)
