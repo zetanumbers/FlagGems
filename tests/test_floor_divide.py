@@ -25,6 +25,8 @@ from . import conftest as cfg
 
 device = flag_gems.device
 
+IS_ASCEND = flag_gems.vendor_name == "ascend"
+
 
 def replace_zeros(inp):
     return torch.where(inp == 0, 1, inp)
@@ -94,6 +96,7 @@ def test_floor_divide_scalar_tensor(x_dtype, y_dtype):
 @pytest.mark.floor_divide_tensor
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", [torch.float32])
+@pytest.mark.skipif(IS_ASCEND, reason="Currently, Ascend does not support the high-precision version.")
 def test_floor_divide_float(shape, dtype):
     if flag_gems.vendor_name == "tsingmicro" and dtype == torch.float32:
         pytest.skip("Issue #3796: not working")
@@ -113,6 +116,7 @@ def test_floor_divide_float(shape, dtype):
 @pytest.mark.floor_divide_tensor_
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("dtype", [torch.float32])
+@pytest.mark.skipif(IS_ASCEND, reason="Currently, Ascend does not support the high-precision version.")
 def test_floor_divide_float_(shape, dtype):
     if flag_gems.vendor_name == "tsingmicro" and dtype == torch.float32:
         pytest.skip("Issue #3796: not working")
