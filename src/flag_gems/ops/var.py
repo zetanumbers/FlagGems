@@ -160,7 +160,7 @@ def var(x, dim=None, *, correction=None, keepdim=False):
 
         with torch_device_fn.device(x.device):
             var_kernel_1[(BLOCK_NUM,)](x, acc, average, count, N, BLOCK_N=BLOCK_N)
-            var_kernel_2[(1,)](acc, average, count, var, N, correction, BLOCK_NUM, BLOCK_N=1024)
+            var_kernel_2[(1,)](acc, average, count, var, N, correction, BLOCK_NUM, BLOCK_N=8192)
     else:
         shape = list(x.shape)
         dim = [d % x.ndim for d in dim]
