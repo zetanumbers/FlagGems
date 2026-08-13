@@ -69,7 +69,7 @@ def test_argsort_bitonic_n(N, dtype):
     torch.manual_seed(42)
     x = torch.randn(N, dtype=dtype, device=flag_gems.device)
 
-    ref_value, ref_index = torch.argsort(utils.to_reference(x), descending=False)
+    ref_value, ref_index = torch.sort(utils.to_reference(x), descending=False)
     res_value, res_index = ascend_sort(x, dim=1, descending=False)
-    utils.gems_assert_close(res_value, ref_value)
+    utils.gems_assert_close(res_value, ref_value, dtype)
     utils.gems_assert_equal(res_index, ref_index)
