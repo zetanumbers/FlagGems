@@ -105,7 +105,6 @@ def var_kernel_1(
 
 
 @libentry()
-@triton.heuristics(runtime.get_heuristic_config("var_mean"))
 @triton.jit(do_not_specialize=["correction"])
 def var_kernel_2(
     Acc,
@@ -118,17 +117,28 @@ def var_kernel_2(
     BLOCK_N: tl.constexpr,
 ):
     offset = tl.arange(0, BLOCK_N)
-    mask = offset < BLOCK_NUM
-    Acc = Acc + offset
-    Average = Average + offset
-    Count = Count + offset
-    acc = tl.load(Acc, mask, other=0.0).to(tl.float32)
-    average = tl.load(Average, mask, other=0.0).to(tl.float32)
-    count = tl.load(Count, mask, other=0.0).to(tl.float32)
 
-    mean, _, nvar = tl.reduce((average, count, acc), axis=0, combine_fn=welford_func)
+    mean_acc = 0.0
+    count_acc = 0.0
+    m2_acc = 0.0
 
-    var = nvar / (N - correction)
+    for off in range(0, BLOCK_NUM, BLOCK_N):
+        cols = off + offset
+        mask = cols < BLOCK_NUM
+        cnt = tl.load(Count + cols, mask=mask, other=0.0).to(tl.float32)
+        avg = tl.load(Average + cols, mask=mask, other=0.0).to(tl.float32)
+        acc = tl.load(Acc + cols, mask=mask, other=0.0).to(tl.float32)
+        cnt = tl.where(mask, cnt, 0.0)
+        avg = tl.where(mask, avg, 0.0)
+        acc = tl.where(mask, acc, 0.0)
+        mean_c, count_c, m2_c = tl.reduce(
+            (avg, cnt, acc), axis=0, combine_fn=welford_func
+        )
+        mean_acc, count_acc, m2_acc = welford_func(
+            mean_acc, count_acc, m2_acc, mean_c, count_c, m2_c
+        )
+
+    var = m2_acc / (count_acc - correction)
     tl.store(Var, var)
 
 
@@ -150,7 +160,7 @@ def var(x, dim=None, *, correction=None, keepdim=False):
 
         with torch_device_fn.device(x.device):
             var_kernel_1[(BLOCK_NUM,)](x, acc, average, count, N, BLOCK_N=BLOCK_N)
-            var_kernel_2[(1,)](acc, average, count, var, N, correction, BLOCK_NUM)
+            var_kernel_2[(1,)](acc, average, count, var, N, correction, BLOCK_NUM, BLOCK_N=1024)
     else:
         shape = list(x.shape)
         dim = [d % x.ndim for d in dim]
