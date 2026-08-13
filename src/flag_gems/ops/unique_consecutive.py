@@ -211,7 +211,7 @@ def global_cumsum_consecutive_impl(
     data = tl.load(data_ptr + i0, mask=mask)
 
     # load tile_sum for previous tiles in chunks to avoid ub overflow
-    per_sum = tl.zeros([1], dtypes=tl.int64)
+    pre_sum = tl.zeros([1], dtype=tl.int64)
     for chunk_start in range(0, next_power_global_ctas_num, 8192):
         cp = chunk_start + tl.arange(0, 8192)
         chunk_mask = (
@@ -221,8 +221,8 @@ def global_cumsum_consecutive_impl(
             & (cp < global_ctas_num)
         )
         chunk_tile_sum = tl.load(tile_sum_ptr + cp, mask=chunk_mask, other=0)
-        per_sum += tl.sum(chunk_tile_sum)
-    total += per_sum
+        pre_sum += tl.sum(chunk_tile_sum)
+    total += pre_sum
     ne_result = tl.load(ne_result_ptr + i0, mask=mask)
     ne_result_i1 = ne_result.to(tl.int1)
     ne_result_i32 = ne_result.to(tl.int32)
