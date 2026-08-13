@@ -14,7 +14,6 @@
 
 """Accuracy tests for top_k_per_row_decode (DeepSeek V4 decode-phase top-K).
 
-Tests the Triton radix-select kernel against the vLLM CUDA reference.
 Uses value-based comparison (sorted selected values must match) to handle
 non-deterministic tie-breaking between implementations.
 """
@@ -30,8 +29,8 @@ from . import conftest as cfg
 device = flag_gems.device
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(),
-    reason="CUDA device required",
+    flag_gems.vendor_name not in ("ascend", "cuda"),
+    reason="CUDA or NPU device required",
 )
 
 
@@ -44,22 +43,6 @@ else:
     BATCH_SIZE_LIST = [1, 496]
     VOCAB_SIZE_LIST = [4096, 8192, 16384, 32768, 129280, 262144]
     TOP_K_LIST = [64, 128, 256, 512, 1024]
-
-# --- vLLM CUDA reference (optional) ---
-try:
-    import vllm._custom_ops  # noqa: F401 — loads torch.ops._C
-
-    def _vllm_top_k_per_row_decode(
-        logits, next_n, seq_lens, indices, num_rows, stride0, stride1, top_k
-    ):
-        torch.ops._C.top_k_per_row_decode(
-            logits, next_n, seq_lens, indices, num_rows, stride0, stride1, top_k
-        )
-
-    HAS_VLLM = True
-except (ImportError, AttributeError):
-    HAS_VLLM = False
-    _vllm_top_k_per_row_decode = None
 
 
 def check_topk_values_match(logits, indices_test, indices_ref, top_k):
@@ -125,7 +108,7 @@ def _torch_topk_ref(
 def test_top_k_per_row_decode(batch_size, vocab_size, top_k):
     """Test top-k correctness: selected values must match reference."""
     torch.manual_seed(42)
-    ref_fn = _vllm_top_k_per_row_decode if HAS_VLLM else _torch_topk_ref
+    ref_fn = _torch_topk_ref
 
     logits, next_n, seq_lens, indices, num_rows, s0, s1, k = _make_inputs(
         batch_size, vocab_size, top_k
@@ -153,7 +136,7 @@ def test_top_k_per_row_decode_partial_seqlen(vocab_size, top_k, seq_len):
     """Test with seq_len < vocab_size (partial valid range)."""
     torch.manual_seed(123)
     batch_size = 1
-    ref_fn = _vllm_top_k_per_row_decode if HAS_VLLM else _torch_topk_ref
+    ref_fn = _torch_topk_ref
 
     logits, next_n, seq_lens, indices, num_rows, s0, s1, k = _make_inputs(
         batch_size, vocab_size, top_k, seq_len=seq_len
@@ -174,7 +157,7 @@ def test_topk_greater_than_row_len():
     vocab_size = 262144
     top_k = 512
     seq_len = 496
-    ref_fn = _vllm_top_k_per_row_decode if HAS_VLLM else _torch_topk_ref
+    ref_fn = _torch_topk_ref
 
     logits, next_n, seq_lens, indices, num_rows, s0, s1, k = _make_inputs(
         batch_size, vocab_size, top_k, seq_len=seq_len
@@ -195,7 +178,7 @@ def test_logits_diff_in_8LSBits():
     vocab_size = 262144
     top_k = 512
     seq_len = vocab_size
-    ref_fn = _vllm_top_k_per_row_decode if HAS_VLLM else _torch_topk_ref
+    ref_fn = _torch_topk_ref
 
     random_8bit = torch.randint(
         0,
