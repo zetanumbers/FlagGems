@@ -14,6 +14,7 @@
 
 from .cross_entropy_loss import cross_entropy_loss
 from .flash_mla import flash_mla
+from .flash_mla_with_kvcache import ascend_sparse_decode_model1
 from .fused_add_rms_norm import fused_add_rms_norm
 from .fused_moe import (
     dispatch_fused_moe_kernel,

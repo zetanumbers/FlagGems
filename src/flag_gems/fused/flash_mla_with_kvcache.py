@@ -39,35 +39,31 @@ from flag_gems.utils.triton_version_utils import has_triton_tle
 _IS_ASCEND = _runtime_device.vendor_name == "ascend"
 
 if _IS_ASCEND:
-    # V32 sparse decode: BH=16, BK=32.
-    # Dequant half1 peak (interleaved): q(50KB) + kv_blk0(16KB) + fp8(8KB)
-    #   + fp32_tmp(32KB) + scale(32KB) + kv_blk1(16KB) + qk(2KB) ≈ 156 KB
     _SPARSE_DECODE_CONFIGS = [
         triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
     ]
-    # MODEL1 sparse decode: same sizing as V32
-    _SPARSE_DECODE_MODEL1_CONFIGS = [
-        triton.Config({"BK": 32, "BH": 16}, num_warps=4, num_stages=1),
-    ]
-    # Dense decode: BLOCK_H=16, BLOCK_N=32.
-    # v_c is [512, 32] bf16 (32KB). QK^T and P@V both use v_c directly (no trans).
-    # Peak UB: q(18KB) + acc(32KB) + v_c(32KB) + p_t(1KB) ≈ 83 KB
     _DENSE_DECODE_CONFIGS = [
         triton.Config({"BLOCK_H": 16, "BLOCK_N": 32}, num_warps=4, num_stages=1),
+        triton.Config({"BLOCK_H": 8, "BLOCK_N": 32}, num_warps=4, num_stages=1),
+        triton.Config({"BLOCK_H": 4, "BLOCK_N": 32}, num_warps=2, num_stages=1),
+        triton.Config({"BLOCK_H": 8, "BLOCK_N": 16}, num_warps=2, num_stages=1),
+        triton.Config({"BLOCK_H": 4, "BLOCK_N": 16}, num_warps=2, num_stages=1),
     ]
 else:
     _SPARSE_DECODE_CONFIGS = [
         triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=2),
         triton.Config({"BK": 64, "BH": 64}, num_warps=8, num_stages=4),
     ]
-    _SPARSE_DECODE_MODEL1_CONFIGS = [
-        triton.Config({"BK": 32, "BH": 64}, num_warps=4, num_stages=1),
-        triton.Config({"BK": 32, "BH": 64}, num_warps=8, num_stages=1),
-    ]
     _DENSE_DECODE_CONFIGS = [
         triton.Config({"BLOCK_H": 64, "BLOCK_N": 64}, num_warps=8, num_stages=2),
         triton.Config({"BLOCK_H": 64, "BLOCK_N": 64}, num_warps=8, num_stages=3),
     ]
+
+# MODEL1 kernel is overridden by the Ascend backend at dispatch time.
+_SPARSE_DECODE_MODEL1_CONFIGS = [
+    triton.Config({"BK": 32, "BH": 64}, num_warps=4, num_stages=1),
+    triton.Config({"BK": 32, "BH": 64}, num_warps=8, num_stages=1),
+]
 
 if has_triton_tle(3, 6, 0):
     try:
@@ -521,8 +517,6 @@ def _sparse_decode_model1_kernel(
         scale5 = (scale5_u8.to(tl.int32) << 23).to(tl.float32, bitcast=True)
         scale6 = (scale6_u8.to(tl.int32) << 23).to(tl.float32, bitcast=True)
 
-        # Interleave dequant with QK^T so fp32 temporaries (kv_fp8, scale) are
-        # freed before the next half's dequant, halving the dequant peak UB.
         kv_fp8_0 = kv_fp8_0_u8.to(tl.float8e4nv, bitcast=True).to(tl.float32)
         scale_0 = tl.where(
             offs_d[:, None] < 64,
@@ -533,7 +527,7 @@ def _sparse_decode_model1_kernel(
                 tl.where(offs_d[:, None] < 192, scale2[None, :], scale3[None, :]),
             ),
         )
-        kv_blk0 = (kv_fp8_0 * scale_0).to(tl.bfloat16)
+        kv_blk0 = kv_fp8_0 * scale_0
         qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
 
         kv_fp8_1 = kv_fp8_1_u8.to(tl.float8e4nv, bitcast=True).to(tl.float32)
@@ -542,7 +536,7 @@ def _sparse_decode_model1_kernel(
             scale4[None, :],
             tl.where(offs_d[:, None] < 128, scale5[None, :], scale6[None, :]),
         )
-        nope_tail = (kv_fp8_1 * scale_1).to(tl.bfloat16)
+        nope_tail = kv_fp8_1 * scale_1
         qk = tl.dot(q_blk1_nope, nope_tail, qk, out_dtype=tl.float32)
 
         rope_ptr = (token_base + NOPE).to(tl.pointer_type(tl.bfloat16))
@@ -557,7 +551,6 @@ def _sparse_decode_model1_kernel(
         qk = tl.where(valid_ids[None, :], qk, float("-inf"))
 
         # Build kv_blk1 [BDP, BK] from nope_tail + rope (for P@V).
-        # Done after QK^T so dequant fp32 temporaries are already freed.
         kv_blk1 = tl.where(
             offs_d[:, None] < (NOPE - BDP),
             nope_tail,
@@ -646,7 +639,6 @@ def _sparse_decode_model1_kernel(
             scale5 = (scale5_u8.to(tl.int32) << 23).to(tl.float32, bitcast=True)
             scale6 = (scale6_u8.to(tl.int32) << 23).to(tl.float32, bitcast=True)
 
-            # Interleave dequant with QK^T (same as main loop)
             kv_fp8_0 = kv_fp8_0_u8.to(tl.float8e4nv, bitcast=True).to(tl.float32)
             scale_0 = tl.where(
                 offs_d[:, None] < 64,
@@ -657,7 +649,7 @@ def _sparse_decode_model1_kernel(
                     tl.where(offs_d[:, None] < 192, scale2[None, :], scale3[None, :]),
                 ),
             )
-            kv_blk0 = (kv_fp8_0 * scale_0).to(tl.bfloat16)
+            kv_blk0 = kv_fp8_0 * scale_0
             qk = tl.dot(q_blk0, kv_blk0, out_dtype=tl.float32)
 
             kv_fp8_1 = kv_fp8_1_u8.to(tl.float8e4nv, bitcast=True).to(tl.float32)
@@ -666,7 +658,7 @@ def _sparse_decode_model1_kernel(
                 scale4[None, :],
                 tl.where(offs_d[:, None] < 128, scale5[None, :], scale6[None, :]),
             )
-            nope_tail = (kv_fp8_1 * scale_1).to(tl.bfloat16)
+            nope_tail = kv_fp8_1 * scale_1
             qk = tl.dot(q_blk1_nope, nope_tail, qk, out_dtype=tl.float32)
 
             rope_ptr = (token_base + NOPE).to(tl.pointer_type(tl.bfloat16))
@@ -680,7 +672,7 @@ def _sparse_decode_model1_kernel(
             qk *= sm_scale
             qk = tl.where(valid_ids[None, :], qk, float("-inf"))
 
-            # Build kv_blk1 for P@V (after QK^T, dequant temps freed)
+            # Build kv_blk1 for P@V
             kv_blk1 = tl.where(
                 offs_d[:, None] < (NOPE - BDP),
                 nope_tail,
@@ -1219,6 +1211,22 @@ def _sparse_decode_dispatch(
                 out=out,
                 lse=lse,
                 sm_scale=softmax_scale,
+            )
+            return
+
+        # On Ascend, delegate MODEL1 sparse decode to the backend which
+        # implements a two-pass workaround for UB overflow with extra KV.
+        if _IS_ASCEND:
+            from flag_gems.runtime.backend._ascend.fused.flash_mla_with_kvcache import (
+                ascend_sparse_decode_model1,
+            )
+            ascend_sparse_decode_model1(
+                q, kv, indices, out, lse,
+                attn_sink, topk_length,
+                extra_kv, extra_indices, extra_topk_length,
+                batch_size, seq_q, num_heads_q,
+                topk, page_block_size,
+                softmax_scale,
             )
             return
 
