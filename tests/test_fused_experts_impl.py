@@ -116,7 +116,7 @@ DISPATCH_FUSED_MOE_KERNEL_CONFIGS = [
 def _dispatch_fused_moe_kernel_config():
     return {
         "BLOCK_SIZE_M": 16,
-        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_N": 64,
         "BLOCK_SIZE_K": 32,
         "GROUP_SIZE_M": 1,
         "num_warps": 2,
@@ -311,6 +311,68 @@ try:
     HAS_VLLM_FUSED_MOE = True
 except ImportError:
     HAS_VLLM_FUSED_MOE = False
+
+# On non-CUDA backends the vLLM C++ extensions (torch.ops._moe_C, torch.ops._C)
+# are unavailable.  Patch the thin wrappers in vllm._custom_ops with torch-native
+# fallbacks so the vLLM reference path works on Ascend NPU.
+# On CUDA the C++ ops are left untouched.
+if HAS_VLLM_FUSED_MOE and flag_gems.device != "cuda":
+    from vllm import _custom_ops as _ops
+
+    def _check_op(namespace, name):
+        try:
+            getattr(getattr(torch.ops, namespace), name)
+            return True
+        except AttributeError:
+            return False
+
+    if not _check_op("_moe_C", "moe_align_block_size"):
+        from vllm.model_executor.layers.fused_moe.moe_align_block_size import (
+            moe_align_block_size_triton,
+        )
+
+        def _moe_align_block_size(
+            topk_ids, num_experts, block_size, sorted_token_ids,
+            expert_ids, num_tokens_post_pad,
+        ):
+            moe_align_block_size_triton(
+                topk_ids, num_experts, block_size,
+                sorted_token_ids, expert_ids, num_tokens_post_pad,
+            )
+
+        _ops.moe_align_block_size = _moe_align_block_size
+
+    if not _check_op("_moe_C", "moe_sum"):
+        def _moe_sum(input, output):
+            output.copy_(input.sum(dim=1))
+
+        _ops.moe_sum = _moe_sum
+
+    if not _check_op("_moe_C", "topk_softmax"):
+        def _topk_softmax(topk_weights, topk_ids, token_expert_indices, gating_output):
+            softmax_out = torch.softmax(gating_output, dim=-1)
+            topk_weights.copy_(softmax_out.gather(1, topk_ids.long()))
+
+        _ops.topk_softmax = _topk_softmax
+
+    # fused_moe.py calls torch.ops._C.silu_and_mul(out, x) and
+    # torch.ops._C.gelu_and_mul(out, x) directly.  Patch the op namespaces
+    # in-place so the calls go through our torch-native fallbacks.
+    if not _check_op("_C", "silu_and_mul"):
+        def _silu_and_mul(out, x):
+            d = x.shape[-1] // 2
+            out.copy_(torch.nn.functional.silu(x[..., :d]) * x[..., d:])
+            return out
+
+        torch.ops._C.silu_and_mul = _silu_and_mul
+
+    if not _check_op("_C", "gelu_and_mul"):
+        def _gelu_and_mul(out, x):
+            d = x.shape[-1] // 2
+            out.copy_(torch.nn.functional.gelu(x[..., :d]) * x[..., d:])
+            return out
+
+        torch.ops._C.gelu_and_mul = _gelu_and_mul
 
 
 @pytest.mark.fused_experts_impl

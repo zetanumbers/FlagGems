@@ -378,25 +378,35 @@ def get_default_config(
             num_stages = 2
             num_warps = 4
 
-        # UB budget check for Ascend NPU (192KB = 196608 bytes)
-        # Account for: A tile (BM*BK*2) + B tile (BK*BN*2) + Accumulator (BM*BN*4)
-        # Use tighter safety factor for small M
-        UB_LIMIT = 196608
-        SAFETY_FACTOR = 0.65 if M <= 64 else 0.70
+        # UB budget check for Ascend NPU.
+        # The bishengir compiler allocates significantly more UB than the
+        # naive A+B+accumulator tile formula predicts.  The overhead grows
+        # with the K-loop trip count (tl.cdiv(K, BK)) because the compiler
+        # keeps loop-carried pointers, masks, and intermediates in UB.
+        # Empirically measured overhead factor on Ascend950PR:
+        #   ~3.7x for K/BK <= 64, rising to ~7x+ for K/BK >= 128.
+        UB_LIMIT = 1769472 // 8  # bits → bytes (actual hardware limit)
+        k_trips = max(1, K // max(block_k, 1))
+        COMPILER_OVERHEAD = 3.7 if k_trips <= 64 else 7.0
 
         ub_per_stage = (
             block_m * block_k * 2  # A tile (bf16)
             + block_k * block_n * 2  # B tile (bf16)
             + block_m * block_n * 4  # Accumulator (fp32)
         )
+        ub_total = ub_per_stage * num_stages * COMPILER_OVERHEAD
 
         # Reduce stages if needed
-        while num_stages > 1 and ub_per_stage * num_stages > UB_LIMIT * SAFETY_FACTOR:
+        while num_stages > 1 and ub_total > UB_LIMIT:
             num_stages -= 1
+            ub_total = ub_per_stage * num_stages * COMPILER_OVERHEAD
 
-        # Reduce block sizes if still over budget
-        while num_stages >= 1 and ub_per_stage * num_stages > UB_LIMIT * SAFETY_FACTOR:
-            # Reduce in order: BN (biggest impact), BM, BK
+        # Reduce block sizes if still over budget.
+        # NOTE: block_n must stay >= 64 on Ascend.  The bishengir compiler
+        # produces silently-wrong code for BN=32 when BM != 32 and the N
+        # dimension has many tiles (num_pid_n > 3).  Reducing block_m or
+        # block_k instead keeps correctness while staying within UB.
+        while num_stages >= 1 and ub_total > UB_LIMIT:
             if block_n > 64:
                 block_n = max(64, block_n // 2)
             elif block_m > 16:
@@ -408,6 +418,7 @@ def get_default_config(
             ub_per_stage = (
                 block_m * block_k * 2 + block_k * block_n * 2 + block_m * block_n * 4
             )
+            ub_total = ub_per_stage * num_stages * COMPILER_OVERHEAD
 
         config = {
             "BLOCK_SIZE_M": block_m,
