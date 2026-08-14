@@ -30,7 +30,8 @@ def fmod_func(x, y):
     y_fp32 = y.to(tl.float32)
     quotient = x_fp32 / y_fp32
     quotient = tl.where(quotient >= 0, tl.floor(quotient), tl.ceil(quotient))
-    result = x_fp32 - y_fp32 * quotient
+    # result = x_fp32 - y_fp32 * quotient
+    result = tl.fma(-y_fp32, quotient, x_fp32)
     # Correction for NPU approximate division
     abs_y = tl.abs(y_fp32)
     # Boundary correction: if |result| >= |y|, quotient was off by 1
