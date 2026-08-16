@@ -995,6 +995,10 @@ COMPLEX_DTYPES = [torch.complex64, torch.complex128]
     flag_gems.vendor_name == "tsingmicro",
     reason="Issues #3897: TX81 does not support complex32 dtype",
 )
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="NPU aclnnInplaceNormal does not support complex dtype",
+)
 def test_complex_elementwise_tensor_tensor(dtype):
     @pointwise_dynamic(
         is_tensor=[True, True, False], promotion_methods=[(0, 1, "DEFAULT")]
@@ -1019,6 +1023,10 @@ def test_complex_elementwise_tensor_tensor(dtype):
 @pytest.mark.skipif(
     flag_gems.vendor_name == "tsingmicro",
     reason="Issues #3897: TX81 does not support complex32 dtype",
+)
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="NPU aclnnInplaceNormal does not support complex dtype",
 )
 def test_complex_elementwise_tensor_scalar(dtype):
     @pointwise_dynamic(
@@ -1055,6 +1063,10 @@ def test_complex_elementwise_tensor_scalar(dtype):
     flag_gems.vendor_name == "tsingmicro",
     reason="Issues #3897: TX81 does not support complex32 dtype",
 )
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="NPU aclnnInplaceNormal does not support complex dtype",
+)
 def test_complex_elementwise_broadcast(dtype):
     @pointwise_dynamic(
         is_tensor=[True, True, False], promotion_methods=[(0, 1, "DEFAULT")]
@@ -1076,6 +1088,10 @@ def test_complex_elementwise_broadcast(dtype):
 @pytest.mark.skipif(
     flag_gems.vendor_name == "tsingmicro",
     reason="Issues #3897: TX81 does not support complex32 dtype",
+)
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="NPU aclnnInplaceNormal does not support complex dtype",
 )
 def test_complex_elementwise_mixed_real_complex(dtype):
     @pointwise_dynamic(
@@ -1100,6 +1116,10 @@ def test_complex_elementwise_mixed_real_complex(dtype):
 @pytest.mark.skipif(
     flag_gems.vendor_name == "tsingmicro",
     reason="Issues #3897: TX81 does not support complex32 dtype",
+)
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="NPU aclnnInplaceNormal does not support complex dtype",
 )
 def test_complex_cross_tensor_tensor(dtype):
     @pointwise_dynamic(
@@ -1133,6 +1153,10 @@ def test_complex_cross_tensor_tensor(dtype):
 @pytest.mark.skipif(
     flag_gems.vendor_name == "tsingmicro",
     reason="Issues #3897: TX81 does not support complex32 dtype",
+)
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="NPU aclnnInplaceNormal does not support complex dtype",
 )
 def test_complex_cross_tensor_scalar(dtype):
     @pointwise_dynamic(
@@ -1175,6 +1199,10 @@ def test_complex_cross_tensor_scalar(dtype):
     flag_gems.vendor_name == "tsingmicro",
     reason="Issues #3897: TX81 does not support complex32 dtype",
 )
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="NPU aclnnInplaceNormal does not support complex dtype",
+)
 def test_complex_cross_broadcast(dtype):
     @pointwise_dynamic(
         is_tensor=[True, True, True, True],
@@ -1204,6 +1232,10 @@ def test_complex_cross_broadcast(dtype):
 @pytest.mark.skipif(
     flag_gems.vendor_name == "tsingmicro",
     reason="Issues #3897: TX81 does not support complex32 dtype",
+)
+@pytest.mark.skipif(
+    flag_gems.vendor_name == "ascend",
+    reason="NPU aclnnInplaceNormal does not support complex dtype",
 )
 def test_complex_real_inputs_bypass(dtype):
     """When all inputs are real, complex-registered kernel should still work."""
