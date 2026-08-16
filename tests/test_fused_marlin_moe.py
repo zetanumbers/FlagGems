@@ -42,7 +42,6 @@ from . import conftest as cfg
 def _is_hopper():
     # The W4A16 fast-path kernel's bf16 dequant uses sm_90-only PTX
     # (sub.bf16x2 / mul.bf16); the fast path is gated to Hopper.
-    return True
     if flag_gems.device != "cuda":
         return False
     major, minor = torch.cuda.get_device_capability()
