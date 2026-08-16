@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 
@@ -21,6 +23,16 @@ def _norm_ref_inp(inp):
     return ref_inp
 
 
+def _get_reduce_dim(shape, dim):
+    if dim is None:
+        return math.prod(shape)
+    dims = dim if isinstance(dim, (list, tuple)) else [dim]
+    reduce_dim = 1
+    for d in dims:
+        reduce_dim *= shape[d % len(shape)]
+    return reduce_dim
+
+
 @pytest.mark.norm
 @pytest.mark.parametrize("shape", REDUCTION_SHAPES)
 @pytest.mark.parametrize("ord", [2, float("inf"), -float("inf"), 0, 1])
@@ -33,7 +45,9 @@ def test_norm(shape, ord, dtype):
     with flag_gems.use_gems():
         res_out = torch.norm(inp, ord)
 
-    gems_assert_close(res_out, ref_out, dtype)
+    gems_assert_close(
+        res_out, ref_out, dtype, reduce_dim=_get_reduce_dim(shape, None)
+    )
 
 
 @pytest.mark.norm_scalar
@@ -47,7 +61,9 @@ def test_norm_scalar(shape, dtype):
     with flag_gems.use_gems():
         res_out = torch.norm(inp)
 
-    gems_assert_close(res_out, ref_out, dtype)
+    gems_assert_close(
+        res_out, ref_out, dtype, reduce_dim=_get_reduce_dim(shape, None)
+    )
 
 
 @pytest.mark.norm_scalaropt_dim
@@ -67,5 +83,5 @@ def test_norm_scalaropt_dim(shape, ord, dim, keepdim, dtype):
     with flag_gems.use_gems():
         res_out = torch.norm(inp, ord, dim, keepdim)
 
-    reduce_dim = len(dim) if isinstance(dim, (list, tuple)) else 1
+    reduce_dim = _get_reduce_dim(shape, dim)
     gems_assert_close(res_out, ref_out, dtype, reduce_dim=reduce_dim)
