@@ -997,6 +997,9 @@ class WrapperGenerator:
                         code.writeline(f"tile_size{i}=tile_sizes[{i}],")
                     code.writeline("one_tile_per_cta=one_tile_per_cta,")
                 code.writeline("num_warps=num_warps,")
+                code.writeline(
+                    "bisheng_options='-mllvm --cce-enable-dynamic-misched=true',"
+                )
             code.writeline(")")
 
     def gen_kernel_launch_1d(
@@ -1043,6 +1046,9 @@ class WrapperGenerator:
                     code.writeline("tile_size=tile_size,")
                     code.writeline("one_tile_per_cta=one_tile_per_cta,")
                 code.writeline("num_warps=num_warps,")
+                code.writeline(
+                    "bisheng_options='-mllvm --cce-enable-dynamic-misched=true',"
+                )
             code.writeline(")")
 
     def gen_return(self, code: IndentedBuffer):
