@@ -42,6 +42,7 @@ from . import conftest as cfg
 def _is_hopper():
     # The W4A16 fast-path kernel's bf16 dequant uses sm_90-only PTX
     # (sub.bf16x2 / mul.bf16); the fast path is gated to Hopper.
+    # return True
     if flag_gems.device != "cuda":
         return False
     major, minor = torch.cuda.get_device_capability()
@@ -544,7 +545,10 @@ def test_fused_marlin_moe_vs_ref(config, dtype, apply_router_weight_on_input):
         ti,
         apply_router_weight_on_input=apply_router_weight_on_input,
     )
-    torch.cuda.synchronize()
+    if flag_gems.device == "cuda":
+        torch.cuda.synchronize()
+    elif flag_gems.device == "npu":
+        torch.npu.synchronize()
 
     max_diff = compute_max_diff(result.float(), ref)
     assert max_diff < 0.04, f"max_diff={max_diff:.4f}"
@@ -579,7 +583,10 @@ def test_fused_marlin_moe_vs_ref_int8(config, dtype):
         quant_type_id=QUANT_TYPE_UINT8B128,
     )
     ref = _reference_swiglu_moe(hs, w1_ref, w2_ref, tw, ti)
-    torch.cuda.synchronize()
+    if flag_gems.device == "cuda":
+        torch.cuda.synchronize()
+    elif flag_gems.device == "npu":
+        torch.npu.synchronize()
     # INT8 should be tighter than INT4; same vLLM Marlin metric.
     max_diff = compute_max_diff(result.float(), ref)
     assert max_diff < 0.04, f"max_diff={max_diff:.4f}"
@@ -619,7 +626,10 @@ def test_fused_marlin_moe_mxfp4_vs_ref(config, dtype):
         group_size=MXFP4_GROUP_SIZE,
     )
     ref = _reference_swiglu_moe(hs, w1_ref, w2_ref, tw, ti)
-    torch.cuda.synchronize()
+    if flag_gems.device == "cuda":
+        torch.cuda.synchronize()
+    elif flag_gems.device == "npu":
+        torch.npu.synchronize()
 
     max_diff = compute_max_diff(result.float(), ref)
     assert max_diff < 0.04, f"max_diff={max_diff:.4f}"

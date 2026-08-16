@@ -283,13 +283,10 @@ def get_moe_wna16_block_config(
     real_top_k: int,
     block_size_m: int,
 ):
+    if not use_moe_wna16_cuda:
+        return {"BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32}
     if "BLOCK_SIZE_N" in config and "BLOCK_SIZE_K" in config:
         return {}
-    if not use_moe_wna16_cuda:
-        if num_valid_tokens // real_top_k == 1:
-            return {"BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 64}
-        else:
-            return {"BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32}
     else:
         block_size_n = 128
         block_size_k = 128

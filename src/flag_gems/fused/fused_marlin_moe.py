@@ -2235,6 +2235,13 @@ def _fused_marlin_moe_impl(
     config = get_config_func(M)
     config["SPLIT_K"] = 1
 
+    # Ascend SIMD pipeline requires BLOCK_SIZE_M >= 32 for wna16 kernels
+    if (use_int8_w8a16 or use_int4_w4a16) and config.get("BLOCK_SIZE_M", 32) < 32:
+        import flag_gems
+
+        if flag_gems.vendor_name == "ascend":
+            config["BLOCK_SIZE_M"] = 32
+
     # cache1 and cache3 share memory (non-overlapping lifetime)
     cache13 = torch.empty(
         M * top_k_num * max(N, K),
