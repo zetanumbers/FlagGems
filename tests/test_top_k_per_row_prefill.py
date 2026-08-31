@@ -47,10 +47,7 @@ else:
     NUM_ROWS_VARIABLE = [4, 16383]
     NUM_ROWS_NONZERO = [1, 16]
 
-pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(),
-    reason="CUDA device required",
-)
+pytestmark = pytest.mark.skipif( not torch.cuda.is_available() and flag_gems.vendor_name != "ascend", reason="CUDA or NPU is required")
 
 # --- vLLM CUDA reference (optional) ---
 try:
