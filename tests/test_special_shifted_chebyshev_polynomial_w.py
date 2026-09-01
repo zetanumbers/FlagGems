@@ -22,10 +22,10 @@ def test_special_shifted_chebyshev_polynomial_w(shape, dtype):
     # Cover full supported range n ∈ [0, 10]
     inp2 = torch.randint(0, 11, shape, dtype=torch.int32, device=flag_gems.device)
 
-    ref_inp1 = utils.to_reference(inp1, True)
-    ref_inp2 = utils.to_reference(inp2, True)
+    ref_inp1 = utils.to_reference(inp1, True).to(torch.float64)
+    ref_inp2 = utils.to_reference(inp2, True).to(torch.float64)
 
-    ref_out = torch.special.shifted_chebyshev_polynomial_w(ref_inp1, ref_inp2)
+    ref_out = torch.special.shifted_chebyshev_polynomial_w(ref_inp1, ref_inp2).to(torch.float32)
     with flag_gems.use_gems():
         res_out = torch.special.shifted_chebyshev_polynomial_w(inp1, inp2)
 
