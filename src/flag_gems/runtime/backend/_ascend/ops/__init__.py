@@ -19,6 +19,7 @@ from .amin import amin, amin_
 from .angle import angle
 from .any import any, any_dim, any_dims
 from .arange import arange, arange_start
+from .arctan2 import arctan2, arctan2_
 from .argmax import argmax
 from .argmin import argmin
 from .fractional_max_pool2d import fractional_max_pool2d_backward
@@ -126,6 +127,8 @@ __all__ = [
     "any_dims",
     "arange",
     "arange_start",
+    "arctan2",
+    "arctan2_",
     "argmax",
     "argmin",
     "baddbmm",
