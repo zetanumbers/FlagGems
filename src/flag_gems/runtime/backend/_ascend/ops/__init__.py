@@ -22,6 +22,7 @@ from .arange import arange, arange_start
 from .arctan2 import arctan2, arctan2_
 from .argmax import argmax
 from .argmin import argmin
+from .atan2 import atan2, atan2_out
 from .fractional_max_pool2d import fractional_max_pool2d_backward
 from .attention import (
     ScaleDotProductAttention,
@@ -131,6 +132,8 @@ __all__ = [
     "arctan2_",
     "argmax",
     "argmin",
+    "atan2",
+    "atan2_out",
     "baddbmm",
     "bmm",
     "cat",
