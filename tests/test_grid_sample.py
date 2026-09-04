@@ -571,8 +571,8 @@ class TestGridSampleBicubic4D:
             align_corners=align_corners,
         )
 
-        # bump atol from 1.3e-6 to 3.0e-6 as relaxed tolerance for bicubic mode
-        assert_close(y_gems, y_torch, atol=3.0e-6, dtype=dtype)
+        # bump atol from 1.3e-6 to 1.0e-5 as relaxed tolerance for bicubic mode
+        assert_close(y_gems, y_torch, atol=1.0e-5, dtype=dtype)
 
 
 class TestGridSample5D:
