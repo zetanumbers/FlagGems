@@ -100,6 +100,7 @@ from .select_scatter import select_scatter
 from .slice_scatter import slice_scatter
 from .softmax import softmax, softmax_backward, softmax_backward_out, softmax_out
 from .sort import sort
+from .special_bessel_j1 import special_bessel_j1
 from .stack import stack
 from .threshold import threshold, threshold_backward
 from .triu import triu
@@ -229,6 +230,7 @@ __all__ = [
     "softmax_backward_out",
     "softmax_out",
     "sort",
+    "special_bessel_j1",
     "stack",
     "threshold",
     "threshold_backward",

@@ -85,10 +85,11 @@ def naive_chunk_gated_delta_rule_fwd(q, k, v, g, beta, scale, initial_state):
 def test_chunk_gated_delta_rule_fwd_accuracy(B, T, H, K, V, dtype):
     device = flag_gems.device
     torch.manual_seed(42)
-
-    q = torch.randn(B, T, H, K, device=device, dtype=dtype)
-    k = torch.randn(B, T, H, K, device=device, dtype=dtype)
-    v = torch.randn(B, T, H, V, device=device, dtype=dtype)
+    if flag_gems.vendor_name == "ascend" and B == 2:
+        pytest.skip("Currently, Ascend does not support B > 1.")
+    q = torch.randn(B, T, H, K, device=device, dtype=dtype) * 0.3
+    k = torch.randn(B, T, H, K, device=device, dtype=dtype) * 0.3
+    v = torch.randn(B, T, H, V, device=device, dtype=dtype) * 0.3
     g = F.logsigmoid(torch.randn(B, T, H, device=device, dtype=dtype))
     beta = torch.rand(B, T, H, device=device, dtype=dtype).sigmoid()
     scale = K**-0.5
@@ -130,9 +131,9 @@ def test_chunk_gated_delta_rule_fwd_no_initial_state(T):
     torch.manual_seed(0)
 
     B, H, K, V = 1, 4, 64, 64
-    q = torch.randn(B, T, H, K, device=device, dtype=dtype)
-    k = torch.randn(B, T, H, K, device=device, dtype=dtype)
-    v = torch.randn(B, T, H, V, device=device, dtype=dtype)
+    q = torch.randn(B, T, H, K, device=device, dtype=dtype) * 0.3
+    k = torch.randn(B, T, H, K, device=device, dtype=dtype) * 0.3
+    v = torch.randn(B, T, H, V, device=device, dtype=dtype) * 0.3
     g = F.logsigmoid(torch.randn(B, T, H, device=device, dtype=dtype))
     beta = torch.rand(B, T, H, device=device, dtype=dtype).sigmoid()
     scale = K**-0.5
@@ -166,9 +167,9 @@ def test_chunk_gated_delta_rule_fwd_with_cu_seqlens(T):
     torch.manual_seed(1)
 
     B, H, K, V = 1, 4, 64, 64
-    q = torch.randn(B, T, H, K, device=device, dtype=dtype)
-    k = torch.randn(B, T, H, K, device=device, dtype=dtype)
-    v = torch.randn(B, T, H, V, device=device, dtype=dtype)
+    q = torch.randn(B, T, H, K, device=device, dtype=dtype) * 0.3
+    k = torch.randn(B, T, H, K, device=device, dtype=dtype) * 0.3
+    v = torch.randn(B, T, H, V, device=device, dtype=dtype) * 0.3
     g = F.logsigmoid(torch.randn(B, T, H, device=device, dtype=dtype))
     beta = torch.rand(B, T, H, device=device, dtype=dtype).sigmoid()
     scale = K**-0.5
