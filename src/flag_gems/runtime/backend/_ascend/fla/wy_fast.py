@@ -40,9 +40,9 @@ def recompute_w_u_fwd_kernel(
 ):
     T_max = T
     i_t_o = tl.program_id(0)
+    i_b = tl.program_id(1)
 
-    for i_bh in range(H):
-        i_b, i_h = i_bh // H, i_bh % H
+    for i_h in range(H):
         if IS_VARLEN:
             i_n, i_t = (
                 tl.load(chunk_indices + i_t_o * 2).to(tl.int32),
@@ -67,10 +67,10 @@ def recompute_w_u_fwd_kernel(
         mask_A = mask_t[:, None]
         b_A = tl.load(ptr_A, mask=mask_A, other=0.0).to(tl.float32)
 
-        ptr_g = g + bos + i_h * T_max + global_offs_t
+        ptr_g = g + (i_b * H + i_h) * T_max + global_offs_t
         b_g = tl.exp(tl.load(ptr_g, mask=mask_t, other=0.0)).to(tl.float32)
 
-        ptr_beta = beta + bos + i_h * T_max + global_offs_t
+        ptr_beta = beta + (i_b * H + i_h) * T_max + global_offs_t
         b_beta = tl.load(ptr_beta, mask=mask_t, other=0.0).to(tl.float32)
 
         for i_v in range(tl.cdiv(V, BV)):
