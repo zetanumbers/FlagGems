@@ -20,6 +20,13 @@ from flag_gems.fused.FLA.fused_cumsum_kkt_solve_tril import (
 from flag_gems.fused.FLA.utils import SUPPRESS_LEVEL
 from flag_gems.fused.FLA.wy_fast import recompute_w_u_fwd
 
+try:
+    from flag_gems.runtime import device as _runtime_device
+
+    _IS_ASCEND = _runtime_device.vendor_name == "ascend"
+except Exception:
+    _IS_ASCEND = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +48,25 @@ def chunk_gated_delta_rule_fwd(
     cu_seqlens: torch.LongTensor | None = None,
 ):
     logger.debug("GEMS CHUNK GATED DELTA RULE FWD")
+
+    # Dispatch to Ascend backend which has vendor-specific kernels
+    if _IS_ASCEND:
+        from flag_gems.runtime.backend._ascend.fla.chunk import (
+            chunk_gated_delta_rule_fwd as _ascend_fwd,
+        )
+
+        return _ascend_fwd(
+            q=q,
+            k=k,
+            v=v,
+            g=g,
+            beta=beta,
+            scale=scale,
+            initial_state=initial_state,
+            output_final_state=output_final_state,
+            cu_seqlens=cu_seqlens,
+        )
+
     q_contiguous = q.is_contiguous()
     k_contiguous = k.is_contiguous()
     v_contiguous = v.is_contiguous()

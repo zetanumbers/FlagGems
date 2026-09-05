@@ -36,7 +36,7 @@ def chunk_gated_delta_rule_fwd(
     A = chunk_scaled_dot_kkt_fwd(
         k=k, beta=beta, g_cumsum=g, cu_seqlens=cu_seqlens, output_dtype=torch.float32
     )
-    A = solve_tril(A=A, cu_seqlens=cu_seqlens, output_dtype=k.dtype)
+    A = solve_tril(A=A, cu_seqlens=cu_seqlens, output_dtype=torch.float32)
     w, u = recompute_w_u_fwd(
         k=k,
         v=v,
