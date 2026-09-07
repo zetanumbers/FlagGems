@@ -38,5 +38,4 @@ def prepare_chunk_offsets(
 
 @triton.jit
 def safe_exp(x):
-    x = x.to(tl.float32)
     return tl.exp(tl.where(x <= 0, x, float("-inf")))

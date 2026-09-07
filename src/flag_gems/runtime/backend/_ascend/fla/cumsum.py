@@ -85,7 +85,7 @@ def chunk_local_cumsum_scalar_kernel(
         b_o = tl.trans(b_o, (1, 0, 2))
         b_o = tl.reshape(b_o, (BLOCK_T, H))
 
-    tl.store(ptr_o, b_o.to(ptr_o.dtype.element_ty), boundary_check=(0,))
+    tl.store(ptr_o, b_o.to(s.dtype.element_ty), boundary_check=(0,))
     return
 
 

@@ -55,7 +55,6 @@ def recompute_w_u_fwd_kernel(
             T = eos - bos
         else:
             bos, eos = i_b * T, i_b * T + T
-            i_t = i_t_o
 
         offs_t = tl.arange(0, BT)
         global_offs_t = i_t * BT + offs_t
@@ -124,8 +123,8 @@ def recompute_w_u_fwd(
     BK = 64
     BV = 64
 
-    u = torch.empty_like(v, dtype=torch.float32)
-    w = k.new_empty(B, T, H, K, dtype=torch.float32)
+    u = torch.empty_like(v)
+    w = k.new_empty(B, T, H, K)
     beta = beta.transpose(1, 2).contiguous()
     g_cumsum = g_cumsum.transpose(1, 2).contiguous()
     recompute_w_u_fwd_kernel[(NT, B)](
