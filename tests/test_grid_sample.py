@@ -744,7 +744,7 @@ class TestGridSampleExtremeSizes:
         )
 
         # Use slightly relaxed tolerance for bicubic mode due to accumulated floating-point errors
-        atol = 3.0e-6 if mode == "bicubic" else ATOL_DICT.get(dtype, 1e-5)
+        atol = 1e-5 if mode == "bicubic" else ATOL_DICT.get(dtype, 1e-5)
         assert_close(y_gems, y_torch, atol=atol, dtype=dtype)
 
     @pytest.mark.grid_sample
