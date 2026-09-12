@@ -63,7 +63,8 @@ def kernel_2(mid, out, mid_size, BLOCK_MID: tl.constexpr):
 @pointwise_dynamic(is_tensor=[True, True], promotion_methods=[(0, "DEFAULT")])
 @triton.jit
 def func(x, y):
-    return (x - y) * (x - y)
+    diff = x.to(tl.float32) - y.to(tl.float32)
+    return diff * diff
 
 
 class Reduction(Enum):
