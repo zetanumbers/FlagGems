@@ -370,6 +370,11 @@ def median_lastdim_sort_kernel(
 
 
 @libentry()
+@triton.autotune(
+    configs=[triton.Config({"multibuffer": MB}) for MB in [True, False]],
+    key=['WIDTH', 'BLOCK', 'SEARCH_STEPS'],
+)
+@triton.heuristics({"num_warps": lambda args: min(8, max(4, args["BLOCK"] // 512))})
 @triton.jit
 def median_int_lastdim_select_kernel(
     row_data,
@@ -1078,7 +1083,6 @@ def _median_int_lastdim_select(row_data, output_shape):
             WIDTH=width,
             BLOCK=block,
             SEARCH_STEPS=search_steps,
-            num_warps=min(8, max(4, block // 512)),
         )
     return values, indices
 
