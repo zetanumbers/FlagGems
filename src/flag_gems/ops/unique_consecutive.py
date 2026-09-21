@@ -102,6 +102,11 @@ def output_counts_impl(
 
 
 @libentry()
+@triton.autotune(
+    configs=[triton.Config({"multibuffer": MB}) for MB in [True, False]],
+    key=['tiles_per_cta', 'tile_size'],
+)
+@triton.heuristics({"num_warps": lambda args: 8 if args['tiles_per_cta'] == 1 else 32})
 @triton.jit
 def output_counts_kernel(
     idx_ptr: tl.tensor,
@@ -257,6 +262,12 @@ def global_cumsum_consecutive_impl(
 
 
 @libentry()
+@triton.autotune(
+    configs=[triton.Config({"multibuffer": MB}) for MB in [True, False]],
+    key=['one_tile_per_cta', 'tile_size'],
+    restore_value=['tile_sum_ptr'],
+)
+@triton.heuristics({"num_warps": lambda args: 8 if args['tiles_per_cta'] == 1 else 32})
 @triton.jit
 def global_cumsum_consecutive_kernel(
     ne_result_ptr: tl.tensor,
@@ -369,7 +380,6 @@ def simple_unique_consecutive_flat(
                 num_tasks=out_size,
                 tiles_per_cta=1,
                 tile_size=triton.next_power_of_2(out_size),
-                num_warps=8,
             )
 
     return data_out[:out_size], inverse_indices, counts
@@ -443,7 +453,6 @@ def large_unique_consecutive_flat(
             one_tile_per_cta=tiles_per_cta == 1,
             return_inverse=return_inverse,
             return_counts=return_counts,
-            num_warps=num_warps,
         )
         out_size = tile_sum[-1].item()
 
@@ -458,7 +467,6 @@ def large_unique_consecutive_flat(
                 out_size,
                 tiles_per_cta,
                 tile_size,
-                num_warps=num_warps,
             )
 
     return data_out[:out_size], inverse_indices, counts
