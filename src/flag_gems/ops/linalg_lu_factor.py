@@ -145,6 +145,11 @@ def _lu_factor_panel_no_pivot_kernel(
 
 
 @libentry()
+@triton.autotune(
+    configs=[triton.Config({"multibuffer": MB}) for MB in [True, False]],
+    key=['BLOCK_M', 'BLOCK_B', 'LEFT_BLOCK_N'],
+    restore_value=['LU'],
+)
 @triton.jit
 def _lu_factor_panel_kernel(
     LU,
@@ -355,6 +360,11 @@ def _lu_factor_swap_right_and_solve_kernel(
 
 
 @libentry()
+@triton.autotune(
+    configs=[triton.Config({"multibuffer": MB}, num_warps=4) for MB in [True, False]],
+    key=['BLOCK_M', 'BLOCK_B', 'RIGHT_BLOCK_N', 'LEFT_BLOCK_N'],
+    restore_value=['LU'],
+)
 @triton.jit
 def _lu_factor_panel_swap_right_and_solve_kernel(
     LU,
@@ -1154,7 +1164,6 @@ def _blocked_lu_factor(input_contiguous, pivot, LU=None, pivots=None):
                         _LU_FACTOR_FUSED_TILE_N,
                         left_block,
                         apply_left_this_panel,
-                        num_warps=4,
                     )
                 else:
                     _lu_factor_panel_kernel[(batch,)](
