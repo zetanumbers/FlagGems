@@ -105,6 +105,14 @@ def var_kernel_1(
 
 
 @libentry()
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_N": BLOCK_N, "multibuffer": MB})
+        for MB in [True, False]
+        for BLOCK_N in [4096, 6144, 8192]
+    ],
+    key=['BLOCK_NUM'],
+)
 @triton.jit(do_not_specialize=["correction"])
 def var_kernel_2(
     Acc,
@@ -160,7 +168,7 @@ def var(x, dim=None, *, correction=None, keepdim=False):
 
         with torch_device_fn.device(x.device):
             var_kernel_1[(BLOCK_NUM,)](x, acc, average, count, N, BLOCK_N=BLOCK_N)
-            var_kernel_2[(1,)](acc, average, count, var, N, correction, BLOCK_NUM, BLOCK_N=8192)
+            var_kernel_2[(1,)](acc, average, count, var, N, correction, BLOCK_NUM)
     else:
         shape = list(x.shape)
         dim = [d % x.ndim for d in dim]
