@@ -128,7 +128,10 @@ def _fht_fused_7stage(
 # Generic fused butterfly kernel (any power-of-2 dim)
 # ============================================================
 
-
+@triton.autotune(
+    configs=[triton.Config({"multibuffer": MB}) for MB in [True, False]],
+    key=['ROWS_PER_PROGRAM', 'DIM', 'LOG_N']
+)
 @triton.jit
 def _fht_fused_generic(
     IN_ptr,
