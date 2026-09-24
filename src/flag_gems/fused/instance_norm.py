@@ -304,7 +304,7 @@ def update_running_stats_kernel(
     for b in range(0, B, BLOCK_BATCH_SIZE):
         bid = b * BLOCK_BATCH_SIZE + tl.arange(0, BLOCK_BATCH_SIZE)[:, None]
         row_mask = bid < B
-        mask = row_mask and col_mask[None, :]
+        mask = row_mask & col_mask[None, :]
         mean = tl.load(mean_ptr + bid * C + cid[None, :], mask=mask, other=0.0).to(
             tl.float32
         )
@@ -345,51 +345,44 @@ def instance_norm_backward_kernel(
     BLOCK_COL_SIZE: tl.constexpr,
     HAS_WEIGHT_BIAS: tl.constexpr,
 ):
-    pid = tl.program_id(0) * BLOCK_ROW_SIZE + tl.arange(0, BLOCK_ROW_SIZE)[:, None]
-    c_offsets = pid % C
-    row_mask = pid < M
-    dY += pid * N
-    X += pid * N
-    dX += pid * N
-    Mean += pid
-    Rstd += pid
+    pid = tl.program_id(0)
+    row = pid
+    if row >= M:
+        return
 
-    mean = tl.load(Mean, mask=row_mask, other=0.0).to(tl.float32)
-    rstd = tl.load(Rstd, mask=row_mask, other=1.0).to(tl.float32)
+    c_offsets = row % C
+
+    mean = tl.load(Mean + row).to(tl.float32)
+    rstd = tl.load(Rstd + row).to(tl.float32)
     if HAS_WEIGHT_BIAS:
-        w = tl.load(W + c_offsets, mask=row_mask).to(tl.float32)
+        w = tl.load(W + c_offsets).to(tl.float32)
     else:
         w = 1
 
-    dx_part2 = tl.zeros([BLOCK_ROW_SIZE, BLOCK_COL_SIZE], dtype=tl.float32)
-    dx_part3 = tl.zeros([BLOCK_ROW_SIZE, BLOCK_COL_SIZE], dtype=tl.float32)
+    dx_2 = 0.0
+    dx_3 = 0.0
 
     for off in range(0, N, BLOCK_COL_SIZE):
         cols = off + tl.arange(0, BLOCK_COL_SIZE)
-        col_mask = cols[None, :] < N
-        mask = row_mask and col_mask
-        dy = tl.load(dY + cols[None, :], mask).to(tl.float32)
-        x = tl.load(X + cols[None, :], mask).to(tl.float32)
-        x = tl.where(mask, x - mean, 0.0)
+        col_mask = cols < N
+        dy = tl.load(dY + row * N + cols, mask=col_mask, other=0.0).to(tl.float32)
+        x = tl.load(X + row * N + cols, mask=col_mask, other=0.0).to(tl.float32)
+        x = tl.where(col_mask, x - mean, 0.0)
         x_hat = x * rstd
         dx_hat = dy * w
-        dx_part2 += dx_hat
-        dx_part3 += dx_hat * x_hat
-
-    dx_2 = tl.sum(dx_part2, axis=1)[:, None]
-    dx_3 = tl.sum(dx_part3, axis=1)[:, None]
+        dx_2 += tl.sum(dx_hat)
+        dx_3 += tl.sum(dx_hat * x_hat)
 
     for off in range(0, N, BLOCK_COL_SIZE):
         cols = off + tl.arange(0, BLOCK_COL_SIZE)
-        col_mask = cols[None, :] < N
-        mask = row_mask and col_mask
-        dy = tl.load(dY + cols[None, :], mask).to(tl.float32)
-        x = tl.load(X + cols[None, :], mask).to(tl.float32)
-        x = tl.where(mask, x - mean, 0.0)
+        col_mask = cols < N
+        dy = tl.load(dY + row * N + cols, mask=col_mask, other=0.0).to(tl.float32)
+        x = tl.load(X + row * N + cols, mask=col_mask, other=0.0).to(tl.float32)
+        x = tl.where(col_mask, x - mean, 0.0)
         x_hat = x * rstd
         dx_hat = dy * w
         dx = rstd * (dx_hat - (dx_2 + x_hat * dx_3) / N)
-        tl.store(dX + cols, dx, mask=mask)
+        tl.store(dX + row * N + cols, dx, mask=col_mask)
 
 
 @libentry()
@@ -412,10 +405,7 @@ def weight_bias_backward_kernel(
     BLOCK_BATCH_SIZE: tl.constexpr,
     BLOCK_COL_SIZE: tl.constexpr,
 ):
-    cid = tl.program_id(0)[None]
-    cid = cid[:, None]
-    dW += cid
-    dB += cid
+    cid = tl.program_id(0)
     c_mask = cid < C
 
     accW = tl.zeros([BLOCK_BATCH_SIZE, BLOCK_COL_SIZE], dtype=tl.float32)
@@ -425,22 +415,22 @@ def weight_bias_backward_kernel(
         bid = b_off + tl.arange(0, BLOCK_BATCH_SIZE)[:, None]
         mid = bid * C + cid
         row_mask = bid < B
-        mean = tl.load(Mean + mid, mask=row_mask).to(tl.float32)
-        rstd = tl.load(Rstd + mid, mask=row_mask).to(tl.float32)
+        mean = tl.load(Mean + mid, mask=row_mask, other=0.0).to(tl.float32)
+        rstd = tl.load(Rstd + mid, mask=row_mask, other=0.0).to(tl.float32)
         for off in range(0, N, BLOCK_COL_SIZE):
             cols = off + tl.arange(0, BLOCK_COL_SIZE)
             col_mask = cols[None, :] < N
-            mask = row_mask and col_mask
-            dy = tl.load(dY + mid * N + cols[None, :], mask).to(tl.float32)
-            x = tl.load(X + mid * N + cols[None, :], mask).to(tl.float32)
+            mask = row_mask & col_mask
+            dy = tl.load(dY + mid * N + cols[None, :], mask=mask, other=0.0).to(tl.float32)
+            x = tl.load(X + mid * N + cols[None, :], mask=mask, other=0.0).to(tl.float32)
             x = tl.where(mask, x - mean, 0.0)
             x_hat = x * rstd
             accW += dy * x_hat
             accB += dy
     dw = tl.sum(accW)
     db = tl.sum(accB)
-    tl.store(dW, dw, mask=c_mask)
-    tl.store(dB, db, mask=c_mask)
+    tl.store(dW + cid, dw, mask=c_mask)
+    tl.store(dB + cid, db, mask=c_mask)
 
 
 class InstanceNorm(torch.autograd.Function):
@@ -610,7 +600,7 @@ class InstanceNorm(torch.autograd.Function):
 
         with torch_device_fn.device(x.device):
             in_grad = torch.empty_like(x)
-            grid = lambda meta: (triton.cdiv(M, meta["BLOCK_ROW_SIZE"]), 1, 1)
+            grid = (M, 1, 1)
             instance_norm_backward_kernel[grid](
                 out_grad,
                 x,
