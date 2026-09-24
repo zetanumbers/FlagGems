@@ -85,29 +85,29 @@ def celoss_probability_kernel(
     pid_d = ext.program_id(0)
     pid_n = ext.program_id(1)
     offset_d = pid_d * BLOCK_D + tl.arange(0, BLOCK_D)
+    d_mask = offset_d < D
 
-    lse = tl.load(lse_ptr + pid_n * D + offset_d, mask=offset_d < D, other=0.0)[None, :]
+    lse = tl.load(lse_ptr + pid_n * D + offset_d, mask=d_mask, other=0.0)
 
-    _sum = tl.zeros([BLOCK_C, BLOCK_D], dtype=tl.float32)
+    out = tl.zeros([BLOCK_D], dtype=tl.float32)
     for off in range(0, C, BLOCK_C):
         offset_c = off + tl.arange(0, BLOCK_C)
         inp_ptrs = inp_ptr + pid_n * C * D + offset_c[:, None] * D + offset_d[None, :]
         tgt_ptrs = tgt_ptr + pid_n * C * D + offset_c[:, None] * D + offset_d[None, :]
-        mask = (offset_c[:, None] < C) & (offset_d[None, :] < D)
+        mask = (offset_c[:, None] < C) & d_mask[None, :]
         inp = tl.load(inp_ptrs, mask, other=0).to(tl.float32)
         tgt = tl.load(tgt_ptrs, mask, other=0).to(tl.float32)
         tgt = tgt * (1.0 - label_smoothing) + label_smoothing / C
-        log = lse - inp
+        log = lse[None, :] - inp
         w_mask = offset_c < C
         if w_ptr is None:
             w = w_mask.to(tl.float32)
         else:
             w = tl.load(w_ptr + offset_c, mask=w_mask, other=0).to(tl.float32)
-        _sum += tl.where(mask, log * tgt * w[:, None], 0.0)
+        out += tl.sum(tl.where(mask, log * tgt * w[:, None], 0.0), axis=0)
 
-    out = tl.sum(_sum, axis=0)
     out_ptrs = out_ptr + pid_n * D + offset_d
-    tl.store(out_ptrs, out, mask=offset_d < D)
+    tl.store(out_ptrs, out, mask=d_mask)
 
 
 @libentry()
@@ -515,10 +515,17 @@ class CrossEntropyLoss(torch.autograd.Function):
         out = torch.empty(shape, dtype=torch.float32, device=inp.device)
 
         if tgt.ndim == dim:
-            with torch_device_fn.device(inp.device):
-                celoss_probability_kernel[grid](
-                    inp, tgt, weight, out, lse_buf, label_smoothing, C, D,
-                )
+            inp_f = inp.float()
+            tgt_f = tgt.float()
+            tgt_f = tgt_f * (1.0 - label_smoothing) + label_smoothing / C
+            log = lse_buf.unsqueeze(1) - inp_f
+            if weight is not None:
+                if D == 1:
+                    out = (log * tgt_f * weight.float().unsqueeze(0)).sum(dim=1)
+                else:
+                    out = (log * tgt_f * weight.float().unsqueeze(0).unsqueeze(-1)).sum(dim=1)
+            else:
+                out = (log * tgt_f).sum(dim=1)
         elif label_smoothing == 0:
             # Non-smooth: compute entirely with precomputed values (no gather)
             if D == 1:
