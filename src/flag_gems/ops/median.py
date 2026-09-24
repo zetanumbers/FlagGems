@@ -109,7 +109,13 @@ def median_small_dim_kernel(
     ordered = tl.sort(sortable, dim=1, descending=False)
     rank = (reduction_size - 1) // 2
     rank_mask = reduction_offsets[None, :] == rank
-    median_values = tl.sum(tl.where(rank_mask, ordered, tl.zeros_like(ordered)), axis=1)
+
+    if inp.dtype.element_ty.is_floating():
+        median_values = tl.sum(tl.where(rank_mask, ordered, tl.zeros_like(ordered)), axis=1)
+    else:
+        # Ascend tl.where bug with int types: use multiply approach
+        is_rank = (rank_mask).to(tl.int64)
+        median_values = tl.sum(ordered.to(tl.int64) * is_rank, axis=1)
 
     first_match = tl.argmax(
         (sample_mask & (samples == median_values[:, None])).to(tl.int32), axis=1
@@ -161,9 +167,14 @@ def median_small_flat_kernel(
 
     ordered = tl.sort(sortable, descending=False)
     rank = (WIDTH - 1) // 2
-    median_value = tl.sum(
-        tl.where(offsets == rank, ordered, tl.zeros_like(ordered)), axis=0
-    )
+    if inp.dtype.element_ty.is_floating():
+        median_value = tl.sum(
+            tl.where(offsets == rank, ordered, tl.zeros_like(ordered)), axis=0
+        )
+    else:
+        # Ascend tl.where bug with int types: use multiply approach
+        is_rank = (offsets == rank).to(tl.int64)
+        median_value = tl.sum(ordered.to(tl.int64) * is_rank, axis=0)
 
     if inp.dtype.element_ty.is_floating():
         nan_i32 = nan_mask.to(tl.int32)
@@ -353,9 +364,15 @@ def median_lastdim_sort_kernel(
     sortable = tl.where(nan_mask, float("inf"), data)
     ordered = tl.sort(sortable, descending=False)
     rank = (WIDTH - 1) // 2
-    median_value = tl.sum(
-        tl.where(cols == rank, ordered, tl.zeros_like(ordered)), axis=0
-    )
+    if row_data.dtype.element_ty.is_floating():
+        median_value = tl.sum(
+            tl.where(cols == rank, ordered, tl.zeros_like(ordered)), axis=0
+        )
+
+    else:
+        # Ascend tl.where bug with int types: use multiply approach
+        is_rank = (cols == rank).to(tl.int64)
+        median_value = tl.sum(ordered.to(tl.int64) * is_rank, axis=0)
 
     first_match = tl.argmax((valid & (data == median_value)).to(tl.int32), axis=0)
     nan_i32 = nan_mask.to(tl.int32)
@@ -1199,10 +1216,11 @@ def _median_direct_dim(inp, dim, output_shape):
     values = torch.empty(output_shape, dtype=inp.dtype, device=inp.device)
     indices = torch.empty(output_shape, dtype=torch.int64, device=inp.device)
     block_n = triton.next_power_of_2(reduction_size)
-    block_out = 2 if block_n >= 128 else 16
     if block_n >= 128:
+        block_out = 1 if inp.dtype == torch.int64 else 2
         num_warps = 8 if inp.dtype in (torch.int32, torch.int64) else 4
     else:
+        block_out = 16
         num_warps = 1
     with torch_device_fn.device(inp.device):
         median_small_dim_kernel[(triton.cdiv(total_outputs, block_out),)](
