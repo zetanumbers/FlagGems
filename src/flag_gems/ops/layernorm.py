@@ -251,54 +251,46 @@ def layer_norm_backward_kernel(
     BLOCK_ROW_SIZE: tl.constexpr,
     BLOCK_COL_SIZE: tl.constexpr,
 ):
-    pid = ext.program_id(0) * BLOCK_ROW_SIZE + tl.arange(0, BLOCK_ROW_SIZE)[:, None]
-    row_mask = pid < M
-    dY += pid * N
-    X += pid * N
-    dX += pid * N
-    Mean += pid
-    Rstd += pid
+    pid = ext.program_id(0)
+    row = pid
+    if row >= M:
+        return
 
-    mean = tl.load(Mean, mask=row_mask).to(tl.float32)
-    rstd = tl.load(Rstd, mask=row_mask).to(tl.float32)
+    mean = tl.load(Mean + row).to(tl.float32)
+    rstd = tl.load(Rstd + row).to(tl.float32)
 
-    dx_part2 = tl.zeros([BLOCK_ROW_SIZE, BLOCK_COL_SIZE], dtype=tl.float32)
-    dx_part3 = tl.zeros([BLOCK_ROW_SIZE, BLOCK_COL_SIZE], dtype=tl.float32)
+    dx_2 = 0.0
+    dx_3 = 0.0
 
     for off in range(0, N, BLOCK_COL_SIZE):
         cols = off + tl.arange(0, BLOCK_COL_SIZE)
-        col_mask = cols[None, :] < N
-        mask = row_mask and col_mask
-        dy = tl.load(dY + cols[None, :], mask).to(tl.float32)
-        x = tl.load(X + cols[None, :], mask).to(tl.float32)
-        x = tl.where(mask, x - mean, 0.0)
+        col_mask = cols < N
+        dy = tl.load(dY + row * N + cols, mask=col_mask, other=0.0).to(tl.float32)
+        x = tl.load(X + row * N + cols, mask=col_mask, other=0.0).to(tl.float32)
+        x = tl.where(col_mask, x - mean, 0.0)
         x_hat = x * rstd
         if W is None:
             w = 1
         else:
-            w = tl.load(W + cols, mask=cols < N).to(tl.float32)
+            w = tl.load(W + cols, mask=col_mask, other=0.0).to(tl.float32)
         dx_hat = dy * w
-        dx_part2 += dx_hat
-        dx_part3 += dx_hat * x_hat
-
-    dx_2 = tl.sum(dx_part2, axis=1)[:, None]
-    dx_3 = tl.sum(dx_part3, axis=1)[:, None]
+        dx_2 += tl.sum(dx_hat)
+        dx_3 += tl.sum(dx_hat * x_hat)
 
     for off in range(0, N, BLOCK_COL_SIZE):
         cols = off + tl.arange(0, BLOCK_COL_SIZE)
-        col_mask = cols[None, :] < N
-        mask = row_mask and col_mask
-        dy = tl.load(dY + cols[None, :], mask).to(tl.float32)
-        x = tl.load(X + cols[None, :], mask).to(tl.float32)
+        col_mask = cols < N
+        dy = tl.load(dY + row * N + cols, mask=col_mask, other=0.0).to(tl.float32)
+        x = tl.load(X + row * N + cols, mask=col_mask, other=0.0).to(tl.float32)
         if W is None:
             w = 1
         else:
-            w = tl.load(W + cols, mask=cols < N).to(tl.float32)
-        x = tl.where(mask, x - mean, 0.0)
+            w = tl.load(W + cols, mask=col_mask, other=0.0).to(tl.float32)
+        x = tl.where(col_mask, x - mean, 0.0)
         x_hat = x * rstd
         dx_hat = dy * w
         dx = rstd * (dx_hat - (dx_2 + x_hat * dx_3) / N)
-        tl.store(dX + cols, dx, mask=mask)
+        tl.store(dX + row * N + cols, dx, mask=col_mask)
 
 
 @libentry()
@@ -321,27 +313,24 @@ def weight_bias_backward_kernel(
 ):
     pid = ext.program_id(0) * BLOCK_COL_SIZE + tl.arange(0, BLOCK_COL_SIZE)
     col_mask = pid < N
-    dY += pid[None, :]
-    X += pid[None, :]
-    accW = tl.zeros([BLOCK_ROW_SIZE, BLOCK_COL_SIZE], dtype=tl.float32)
-    accB = tl.zeros([BLOCK_ROW_SIZE, BLOCK_COL_SIZE], dtype=tl.float32)
+    accW = tl.zeros([BLOCK_COL_SIZE], dtype=tl.float32)
+    accB = tl.zeros([BLOCK_COL_SIZE], dtype=tl.float32)
     for off in range(0, M, BLOCK_ROW_SIZE):
         rows = off + tl.arange(0, BLOCK_ROW_SIZE)[:, None]
         row_mask = rows < M
-        mask = row_mask and col_mask[None, :]
-        dy = tl.load(dY + rows * N, mask).to(tl.float32)
-        x = tl.load(X + rows * N, mask).to(tl.float32)
-        mean = tl.load(Mean + rows, mask=rows < M).to(tl.float32)
-        rstd = tl.load(Rstd + rows, mask=rows < M).to(tl.float32)
+        mask = row_mask & col_mask[None, :]
+        dy = tl.load(dY + rows * N + pid[None, :], mask, other=0.0).to(tl.float32)
+        x = tl.load(X + rows * N + pid[None, :], mask, other=0.0).to(tl.float32)
+        mean = tl.load(Mean + rows, mask=rows < M, other=0.0).to(tl.float32)
+        rstd = tl.load(Rstd + rows, mask=rows < M, other=0.0).to(tl.float32)
         x = tl.where(mask, x - mean, 0.0)
-        accW += dy * x * rstd
-        accB += dy
+        x_hat = x * rstd
+        accW += tl.sum(dy * x_hat, axis=0)
+        accB += tl.sum(dy, axis=0)
     if dW:
-        dw = tl.sum(accW, axis=0)
-        tl.store(dW + pid, dw, mask=col_mask)
+        tl.store(dW + pid, accW, mask=col_mask)
     if dB:
-        db = tl.sum(accB, axis=0)
-        tl.store(dB + pid, db, mask=col_mask)
+        tl.store(dB + pid, accB, mask=col_mask)
 
 
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
@@ -433,7 +422,7 @@ def layer_norm_backward(
 
     if output_mask[0]:
         in_grad = torch.empty_like(input)
-        grid = lambda meta: (triton.cdiv(M, meta["BLOCK_ROW_SIZE"]), 1, 1)
+        grid = (M, 1, 1)
         with torch_device_fn.device(input.device):
             layer_norm_backward_kernel[grid](
                 grad_out, input, weight, mean, rstd, in_grad, M, N

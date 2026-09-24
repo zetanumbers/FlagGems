@@ -19,7 +19,7 @@ import torch
 import triton
 import triton.language as tl
 
-from flag_gems.ops.topk import _get_finfo_val, _get_iinfo_val, argsort
+from flag_gems.ops.topk import _get_finfo_val, _get_iinfo_val
 from flag_gems.runtime import torch_device_fn
 from flag_gems.utils import libentry
 
@@ -48,16 +48,62 @@ def sort_kernel(
         mask_val = _get_finfo_val(in_ptr.dtype.element_ty, return_max=not DESCENDING)
         in_val = tl.load(in_ptr, mask=mask, other=mask_val)
         in_val = tl.where(in_val.dtype.is_fp64(), in_val, in_val.to(tl.float32))
+
+        # Convert float bits to monotonically sortable uint32 key
+        in_bits = in_val.to(tl.uint32, bitcast=True)
+        sign_mask = tl.full(in_bits.shape, 0x80000000, dtype=tl.uint32)
+        sortable_key = tl.where(
+            (in_bits & sign_mask) != 0, ~in_bits, in_bits ^ sign_mask
+        )
     else:
         mask_val = _get_iinfo_val(in_ptr.dtype.element_ty, return_max=not DESCENDING)
         in_val = tl.load(in_ptr, mask=mask, other=mask_val).to(tl.int32)
-    index_val = tl.arange(0, BLOCK_SIZE)
 
-    sorted_in_val, sorted_index_val = argsort(
-        in_val, index_val, 0, descending=DESCENDING
-    )
-    tl.store(out_ptr, sorted_in_val, mask=mask)
-    tl.store(out_index_ptr, sorted_index_val, mask=mask)
+        # For signed int32, flip MSB to get monotonically sortable uint32 key
+        in_bits = in_val.to(tl.uint32, bitcast=True)
+        sign_mask = tl.full(in_bits.shape, 0x80000000, dtype=tl.uint32)
+        sortable_key = in_bits ^ sign_mask
+
+    # XOR MSB so that unsigned key ordering matches signed int32 ordering
+    # (required because tl.sort on Ascend uses signed comparison for int64)
+    adjusted_key = (sortable_key ^ sign_mask).to(tl.int32)
+
+    # Pack (key, index) into a single int64 so tl.sort handles both.
+    # For descending, negate the index so that ties break by smaller
+    # original index (matching torch.sort convention).
+    if DESCENDING:
+        idx_val = (BLOCK_SIZE - 1 - cols).to(tl.int32)
+    else:
+        idx_val = cols.to(tl.int32)
+
+    packed = (adjusted_key.to(tl.int64) << 32) | (idx_val.to(tl.int64) & 0xFFFFFFFF)
+
+    sorted_packed = tl.sort(packed, dim=0, descending=DESCENDING)
+
+    # Unpack
+    sorted_key_i32 = (sorted_packed >> 32).to(tl.int32)
+    sorted_index_raw = (sorted_packed & 0xFFFFFFFF).to(tl.int64)
+
+    if DESCENDING:
+        sorted_index = (BLOCK_SIZE - 1 - sorted_index_raw).to(tl.int64)
+    else:
+        sorted_index = sorted_index_raw
+
+    # Recover original value from sortable key
+    recovered_sortable = sorted_key_i32.to(tl.uint32) ^ sign_mask
+    if IS_FLOAT:
+        recovered_bits = tl.where(
+            (recovered_sortable & sign_mask) != 0,
+            recovered_sortable ^ sign_mask,
+            ~recovered_sortable,
+        )
+        sorted_val = recovered_bits.to(tl.float32, bitcast=True)
+    else:
+        recovered_bits = recovered_sortable ^ sign_mask
+        sorted_val = recovered_bits.to(tl.int32, bitcast=True)
+
+    tl.store(out_ptr, sorted_val, mask=mask)
+    tl.store(out_index_ptr, sorted_index, mask=mask)
 
 
 def sort(inp, dim=-1, descending=False):
