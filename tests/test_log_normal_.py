@@ -25,14 +25,15 @@ from . import accuracy_utils as utils
 @pytest.mark.parametrize("shape", utils.DISTRIBUTION_SHAPES)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
 def test_log_normal_(shape, dtype):
-    # Test log_normal_ with default parameters (mean=1, std=2)
+    # Test log_normal_ with standard log-normal parameters (mean=0, std=1)
     # For log-normal distribution: if X ~ N(mean, std), then exp(X) ~ LogNormal(mean, std)
-    # Expected mean = exp(mean + std^2/2) = exp(1 + 4/2) = exp(3) ≈ 20.085
+    # Expected mean = exp(mean + std^2/2) = exp(0 + 1/2) = exp(0.5) ≈ 1.6487
     # Expected variance = (exp(std^2) - 1) * exp(2*mean + std^2)
-    #                   = (exp(4) - 1) * exp(2 + 4) = (54.598 - 1) * exp(6)
-    #                   ≈ 53.598 * 403.429 ≈ 21633
-    mean_param = 1.0
-    std_param = 2.0
+    #                   = (exp(1) - 1) * exp(1) = 1.7183 * 2.7183 ≈ 4.6708
+    # Using std=1 (instead of std=2) keeps the tail thin enough that float16
+    # never overflows: exp(Z*1+0) > 65504 requires Z > 11.09 (prob ≈ 0).
+    mean_param = 0.0
+    std_param = 1.0
     x = torch.empty(size=shape, dtype=dtype, device=flag_gems.device)
     with flag_gems.use_gems():
         x.log_normal_(mean_param, std_param)
