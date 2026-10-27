@@ -59,7 +59,7 @@ def test_addmv(M, N, scalar, dtype):
     else:
         ref_bias2 = utils.to_reference(bias2)
 
-    ref_out2 = torch.addmv(ref_bias2, ref_mat, ref_vec, alpha=alpha, beta=beta)
+    ref_out2 = torch.addmv(ref_bias2.to(torch.float), ref_mat, ref_vec, alpha=alpha, beta=beta)
     with flag_gems.use_gems():
         res_out2 = torch.addmv(bias2, mat, vec, alpha=alpha, beta=beta)
 
