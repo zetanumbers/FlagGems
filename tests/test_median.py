@@ -23,6 +23,58 @@ from flag_gems import median_dim as gems_median_dim
 from . import accuracy_utils as utils
 from . import conftest as cfg
 
+# --- torch>=2.13 compatibility shim -------------------------------------
+# Recent PyTorch builds removed the named-tensor APIs (Tensor.names,
+# rename, refine_names), but flag_gems.ops.median still relies on them.
+# Restore them with a side table keyed by tensor identity, so the operator
+# keeps its original implementation and named-tensor semantics still work.
+import weakref
+
+_NAMED_TENSOR_SUPPORTED = hasattr(torch.Tensor, "names")
+
+_names_table = {}
+
+
+def _names_register(tensor, names):
+    key = id(tensor)
+    _names_table[key] = tuple(names)
+    # Drop the entry when the tensor dies, so a recycled id cannot inherit
+    # stale names.
+    weakref.finalize(tensor, _names_table.pop, key, None)
+
+
+def _names_view(tensor):
+    # A view sharing storage/stride/layout, used to carry names without
+    # mutating the original tensor (mirrors torch's named-tensor behaviour).
+    return tensor.as_strided(tensor.size(), tensor.stride(), tensor.storage_offset())
+
+
+if not _NAMED_TENSOR_SUPPORTED:
+
+    def _compat_names(self):
+        return _names_table.get(id(self), (None,) * self.dim())
+
+    def _compat_refine_names(self, *names):
+        if len(names) == 1 and names[0] is None:
+            return _names_view(self)
+        if len(names) != self.dim():
+            raise RuntimeError(
+                f"refine_names: number of names ({len(names)}) does not match "
+                f"tensor dimensions ({self.dim()})"
+            )
+        view = _names_view(self)
+        _names_register(view, names)
+        return view
+
+    def _compat_rename(self, *names):
+        if len(names) == 1 and names[0] is None:
+            return _names_view(self)
+        return _compat_refine_names(self, *names)
+
+    torch.Tensor.names = property(_compat_names)
+    torch.Tensor.refine_names = _compat_refine_names
+    torch.Tensor.rename = _compat_rename
+
 if cfg.QUICK_MODE:
     FLOAT_DTYPES = [torch.float32]
     DTYPES = [torch.float32, torch.int32]
