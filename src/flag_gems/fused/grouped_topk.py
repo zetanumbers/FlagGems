@@ -183,7 +183,13 @@ def group_idx_and_topk_triton(
         other=0.0,
     )
 
-    selection_scores_native = scored + expert_bias
+    # Match the reference, which adds bias in fp32 for bf16. Native bf16
+    # vector add rounds before top-k selection and can change the selected
+    # experts; f16/f32 keep their existing native path.
+    if scored.dtype == tl.bfloat16:
+        selection_scores_native = scored.to(tl.float32) + expert_bias.to(tl.float32)
+    else:
+        selection_scores_native = scored + expert_bias
 
     selection_scores = tl.where(
         expert_selected,

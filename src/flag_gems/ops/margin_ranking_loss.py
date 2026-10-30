@@ -55,9 +55,16 @@ def _margin_ranking_loss_kernel(
     y = tl.load(target_ptr + offsets, mask=mask, other=0)
 
     # Compute margin ranking loss: max(0, -y * (x1 - x2) + margin)
-    diff = x1 - x2
-    m = tl.full([BLOCK_SIZE], margin, tl.float32)
-    val = -y * diff + m
+    # The reference computes BF16 in fp32 but keeps the fp16 path rounded to
+    # fp16. Native bf16 subtraction would round before the fp32 margin add.
+    if x1.dtype == tl.bfloat16:
+        diff = x1.to(tl.float32) - x2.to(tl.float32)
+        m = tl.full([BLOCK_SIZE], margin, tl.float32)
+        val = -y.to(tl.float32) * diff + m
+    else:
+        diff = x1 - x2
+        m = tl.full([BLOCK_SIZE], margin, tl.float32)
+        val = -y * diff + m
     zero = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
     loss = tl.maximum(val, zero)
 
