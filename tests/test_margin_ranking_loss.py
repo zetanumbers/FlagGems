@@ -48,7 +48,7 @@ def test_margin_ranking_loss(shape, dtype, margin, reduction):
     ref_target = utils.to_reference(target).to(torch.float32)
     diff = ref_input1 - ref_input2
     neg_y_diff = -ref_target * diff
-    if dtype == torch.float16:
+    if dtype in (torch.float16, torch.bfloat16):
         diff = diff.to(dtype).to(torch.float32)
         neg_y_diff = (-ref_target * diff).to(dtype).to(torch.float32)
     val = neg_y_diff + margin
